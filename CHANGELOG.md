@@ -2,8 +2,15 @@
 
 ## 0.1.0 - Unreleased
 
-- Prepared CommitMe project identity, documentation, and planning specs.
-- Added non-functional placeholders for the planned `/commitme` command and `commitme` tool.
-- Documented planned Conventional Commit drafting and explicit commit-all behavior.
-
-> Runtime feature implementation is pending and must happen in a separate implementation session.
+- Implemented the `/commitme` command to draft a Lightweight Conventional Commit message from staged and unstaged changes, then commit with `git add -A` and `git commit`.
+- Added `/commitme --confirm` confirmation before mutation.
+- Added `/commitme help` usage guidance with an in-session help panel.
+- Updated the `commitme` tool description and prompt guidelines with slash-command usage and the Lightweight Conventional Commit standard.
+- Added the `commitme` Pi tool with gather and explicit commit actions.
+- Added git/project context gathering, sensitive/generated/binary filtering, truncation notices, and deterministic prompt building.
+- Hardened context gathering with secret-like content filtering, diff redaction, unreadable-file handling, `.envrc` detection, untracked-directory expansion, and robust parsing for paths with spaces.
+- Added commit safety guards that refuse known secret files or high-confidence secret tokens and abort when git status changes after context gathering.
+- Bounded command/tool prompts with truncation metadata while preserving the final commit-message output reminder.
+- Aligned prompt and validation with the team Lightweight Conventional Commits standard.
+- Added tests for argument parsing, context gathering, project filtering, truncation, prompt shape, tool behavior, and commit behavior.
+- Documented implemented usage and security boundaries.

@@ -1,64 +1,62 @@
 # CommitMe Structure Guide
 
-CommitMe is prepared as a TypeScript Pi extension package. Runtime feature implementation is pending and must follow the approved brief plus the three specs under `specs/`.
+CommitMe is a TypeScript Pi extension package that registers one slash command and one tool for Conventional Commit message workflows.
 
-## Current prepared layout
+## Current layout
 
 ```text
 src/
-├── extension.ts                  # prepared entry point; registers no runtime behavior yet
-├── constants.ts                  # project identity constants
-├── types.ts                      # planned shared domain types placeholder
+├── extension.ts                  # small extension entry point
+├── constants.ts                  # names, limits, metadata candidates, commit types
+├── types.ts                      # serializable domain types
+├── commitme-details.ts           # shared tool/command result details helpers
 ├── commands/
-│   └── commitme-command.ts       # planned /commitme command placeholder
+│   └── commitme-command.ts       # /commitme argument parsing and command flow
 ├── tools/
-│   └── commitme-tool.ts          # planned commitme tool placeholder
-├── events/
-│   └── lifecycle.ts              # no-op lifecycle placeholder
+│   └── commitme-tool.ts          # commitme TypeBox tool schema and execution
 ├── git/
-│   ├── context.ts                # planned git/project context collector placeholder
-│   └── commit.ts                 # planned git add/commit helper placeholder
+│   ├── context.ts                # git/project context gathering and filtering
+│   └── commit.ts                 # commit message validation and git add/commit helper
 ├── prompt/
-│   └── build-commit-prompt.ts    # planned Conventional Commit prompt builder placeholder
+│   └── build-commit-prompt.ts    # deterministic Conventional Commit prompt builder
 └── utils/
-    └── truncation.ts             # planned truncation helper placeholder
+    └── truncation.ts             # byte/line truncation helpers and notices
 ```
 
-## Planned implementation layout
+## Module boundaries
 
-Keep the entrypoint small:
-
-1. `src/extension.ts` imports registration functions.
-2. `src/extension.ts` calls those `register*` functions.
-3. Feature logic lives in command/tool/git/prompt/utils modules.
-4. Tests cover pure helpers and git integration behavior.
+1. `src/extension.ts` imports registration functions and calls them only.
+2. `src/commands/commitme-command.ts` parses flags, serves `/commitme help`, gathers context, calls the active Pi model, and commits (`--confirm` asks first).
+3. `src/tools/commitme-tool.ts` exposes gather/commit behavior to the agent with structured `details`.
+4. `src/git/context.ts` reads git status/diff data, project metadata, and safe file snippets.
+5. `src/git/commit.ts` validates Lightweight Conventional Commit messages, stages with `git add -A`, and commits with `git commit`.
+6. `src/prompt/build-commit-prompt.ts` formats weak-model-friendly prompt sections, bounds final prompt size, and preserves the final output reminder when truncation is needed.
+7. `src/commitme-details.ts` keeps command and tool result metadata consistent.
+8. `src/utils/truncation.ts` enforces output limits and emits truncation metadata/notices.
 
 ## Pi extension conventions
 
-- Do not start long-lived processes, file watchers, timers, sockets, or background jobs directly in the extension factory.
-- Start session-scoped resources from `session_start`, a command, or a tool; clean them up in `session_shutdown`.
-- For tools, define clear TypeBox schemas, descriptions, `promptSnippet`, and `promptGuidelines`.
-- Each `promptGuidelines` bullet must name the `commitme` tool explicitly.
-- Use `StringEnum` from `@earendil-works/pi-ai` for string enum schemas.
-- Truncate large tool outputs and tell the agent when output is truncated.
-- Keep Pi core packages in `peerDependencies` with `"*"`.
+- No long-lived processes, file watchers, timers, sockets, or background jobs are started.
+- Tools define TypeBox schemas, descriptions, `promptSnippet`, and `promptGuidelines`.
+- Each `promptGuidelines` bullet names the `commitme` tool.
+- String action enums use `StringEnum` from `@earendil-works/pi-ai`.
+- Large outputs are truncated before reaching the model.
+- Pi core packages remain in `peerDependencies` with `"*"`.
 
 ## Security-sensitive areas
 
-The later implementation must document and test these boundaries:
-
-- local git shell execution through `pi.exec("git", args)`
-- read-only draft mode
-- explicit commit mode using `git add -A` and `git commit`
-- optional confirmation only when `--confirm` is set
-- no `git push`
-- no telemetry
-- no non-LLM network APIs
-- no intentional reading of secret files
+- Local git shell execution uses `pi.exec("git", args)` with argument arrays.
+- Tool gather mode is read-only; `/commitme` is an explicit commit command.
+- Commit mode is explicit and uses only `git add -A` plus `git commit`.
+- Optional confirmation runs only when requested.
+- There is no `git push`, telemetry, or non-LLM network API usage.
+- Secret-like, generated, binary, unreadable, and overly large file contents are filtered from context.
+- Commit actions refuse known secret files or high-confidence secret-token content before staging and abort if git status changes after context gathering.
+- Git status parsing uses NUL-delimited `-uall` output internally so untracked directories, paths with spaces, and special characters are handled safely.
 
 ## Planning files
 
 - `docs/PROJECT_DEFINITION_BRIEF.md` - approved preparation brief
 - `specs/spec-architecture.md` - architecture blueprint
 - `specs/spec-guidelines.md` - implementation rules
-- `specs/spec-tasks.md` - implementation task checklist for a later session
+- `specs/spec-tasks.md` - implementation task checklist

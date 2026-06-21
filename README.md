@@ -1,68 +1,80 @@
 # CommitMe
 
-CommitMe is a planned TypeScript [Pi](https://pi.dev/) extension for creating clear, precise Conventional Commit messages from local git changes.
+CommitMe is a TypeScript [Pi](https://pi.dev/) extension that creates clear Conventional Commit messages from local git changes and commits them.
 
-> Current status: repository preparation is complete, but the runtime feature is intentionally not implemented yet. The planned `/commitme` command and `commitme` tool are documented in specs and placeholders only.
+It gathers staged and unstaged git context, trims noisy diffs, adds small project metadata, asks the active Pi model for one commit message, then creates a local git commit.
 
-## Goal
+CommitMe follows Lightweight Conventional Commits:
 
-CommitMe will gather git diff and project context programmatically, format a compact prompt, and use the active Pi LLM provider to draft a commit message. It is designed to stay fast and simple enough for weaker or local models.
+```text
+<type>(optional-scope): <summary>
 
-## Planned behavior
+[optional body]
 
-- `/commitme` drafts a Conventional Commit message from both staged and unstaged changes.
-- `/commitme --commit` stages all changes with `git add -A` and commits with the generated message.
-- `/commitme --commit --confirm` asks before staging and committing.
-- The `commitme` Pi tool gathers the same context for agent-driven workflows.
-- Draft mode is read-only.
-- Commit mode never pushes.
+[optional footer]
+```
 
-## Planned context gathering
+Allowed types are `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `build`, `ci`, `perf`, `style`, and `revert`. Summaries should be imperative, clear, specific, and must not end with a period.
 
-CommitMe will collect a compact, deterministic context bundle:
+## Usage
 
-- current branch and git status
-- staged and unstaged diff summaries
-- changed file paths and statuses
-- bounded diff excerpts
-- relevant project files such as `package.json`, README, and common build/config files
+Load the extension locally:
+
+```bash
+pi --no-extensions -e .
+```
+
+Then run:
+
+```text
+/commitme
+/commitme --confirm
+/commitme help
+```
+
+Behavior:
+
+- `/commitme` drafts a Conventional Commit message, runs `git add -A`, and creates a local commit.
+- `/commitme --confirm` asks before staging and committing.
+- `/commitme help` explains usage, commit standards, and safety behavior.
+- CommitMe aborts before staging if known secret files or high-confidence secret tokens would be committed, or if git status changes after context gathering.
+- CommitMe never pushes.
+
+The `commitme` tool is also available to agents. Use `action: "gather"` to collect compact read-only commit context, or `action: "commit"` with an explicit `message` to create a commit. Commit actions use the same sensitive-file and git-status-change guards as `/commitme`.
+
+## Context gathered
+
+CommitMe collects a compact bundle from the current repository:
+
+- current branch and porcelain status
+- staged and unstaged diff stats
+- staged and unstaged changed paths
+- bounded, redacted diff excerpts
+- small project metadata such as `package.json`, README, and common build config files
 - safe snippets from changed text files
-- truncation metadata when context is too large
+- truncation metadata and visible truncation notices
 
-Sensitive files such as `.env` files and private keys should be listed by path/status only when relevant, not read for contents.
+Untracked directories are expanded to individual files before filtering. The final model prompt is bounded and keeps a commit-message output reminder when truncation is required.
 
-## Development setup
+Sensitive paths such as `.env`, `.envrc`, private keys, kubeconfigs, credentials, generated/binary paths, unreadable files, and files with obvious secret-like content are listed by path/status when relevant but not read into model context. Ordinary source files that contain placeholder words like `TOKEN=not-real` are redacted for model context but are not blocked from committing. Commit actions refuse to stage known secret files or high-confidence token patterns; remove them from the commit or commit them manually if intentional.
+
+## Development
 
 ```bash
 npm install
 npm run validate
 ```
 
-Useful commands:
+Useful checks:
 
 ```bash
 npm run typecheck
+npm run lint
+npm run format:check
 npm run test
 npm run check:pack
 pi --no-extensions -e .
 ```
-
-Use isolated loading for smoke tests so other configured Pi extensions do not interfere:
-
-```bash
-pi --no-extensions -e .
-```
-
-## Implementation handoff
-
-Before implementing features, read:
-
-- `docs/PROJECT_DEFINITION_BRIEF.md`
-- `specs/spec-architecture.md`
-- `specs/spec-guidelines.md`
-- `specs/spec-tasks.md`
-
-Then implement `specs/spec-tasks.md` one checkbox at a time. Keep all preparation-only checkboxes unchanged until real implementation work is done in a separate session.
 
 ## Packaging notes
 

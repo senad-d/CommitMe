@@ -85,9 +85,9 @@ Do not add extra layers until there is a clear need.
 
 - Register `/commitme` via `pi.registerCommand("commitme", ...)`.
 - Keep argument parsing deterministic and documented.
-- Draft mode is the default.
-- `--commit` explicitly enables staging/committing.
+- Commit mode is the default for `/commitme`.
 - `--confirm` asks before mutation when UI is available.
+- `help`, `--help`, and `-h` show usage without git or model work.
 - If the agent is busy, handle this predictably: wait for idle or notify the user, depending on the final implementation choice.
 - Use concise notifications; avoid noisy UI.
 
@@ -167,7 +167,7 @@ Do not use commitme to create a commit unless the user explicitly requested comm
 ## Documentation Rules
 
 - README must distinguish planned/prepared behavior from implemented behavior until feature work is complete.
-- README must document `/commitme`, `--commit`, and `--confirm` when implemented.
+- README must document `/commitme`, `/commitme --confirm`, and `/commitme help` when implemented.
 - SECURITY must document local git/file reads, git mutation in commit mode, no push, no telemetry, and no non-LLM network APIs.
 - CHANGELOG must record preparation and later implementation changes.
 - `docs/STRUCTURE.md` must match the actual file layout.
@@ -182,9 +182,9 @@ Do not use commitme to create a commit unless the user explicitly requested comm
 - Test truncation boundaries.
 - Test sensitive-file filtering.
 - Test command flag parsing:
-  - no flags = draft
-  - `--commit` = commit all
-  - `--commit --confirm` = ask before commit
+  - no flags = commit all
+  - `--confirm` = ask before commit
+  - `help` = show usage
 - Test package metadata and Pi manifest.
 - Do not write tests that require real network APIs.
 
@@ -196,7 +196,7 @@ Do not use commitme to create a commit unless the user explicitly requested comm
 - Do not call external network APIs other than the active Pi LLM provider used by Pi itself.
 - Do not read credentials or `.env` contents intentionally.
 - Do not run arbitrary shell commands; use `git` only for the initial design.
-- Commit mode must be explicit.
+- Commit mode is explicitly user-triggered by `/commitme`.
 - Confirmation is controlled by `--confirm`; do not add hidden prompts in default mode.
 - Never run `git push`.
 

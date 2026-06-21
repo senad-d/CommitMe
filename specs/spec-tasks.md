@@ -34,7 +34,7 @@ IMPORTANT: Execute every step in order, top to bottom. Do not mark a checkbox co
 
 ### 1. Establish real feature module skeleton
 
-- [ ] Replace preparation placeholders with the final CommitMe module structure and exports.
+- [x] Replace preparation placeholders with the final CommitMe module structure and exports.
 
 Create or update the planned modules without adding complex behavior yet. Keep `src/extension.ts` small and limited to registration calls.
 
@@ -47,7 +47,7 @@ Create or update the planned modules without adding complex behavior yet. Keep `
 
 ### 2. Define shared domain types and constants
 
-- [ ] Add shared types and constants for command options, git context, prompt inputs, truncation metadata, and commit results.
+- [x] Add shared types and constants for command options, git context, prompt inputs, truncation metadata, and commit results.
 
 Keep types simple and serializable so they can be stored in tool result `details`.
 
@@ -60,21 +60,21 @@ Keep types simple and serializable so they can be stored in tool result `details
 
 ### 3. Implement `/commitme` argument parsing
 
-- [ ] Implement deterministic parsing for `/commitme`, `/commitme --commit`, and `/commitme --commit --confirm`.
+- [x] Implement deterministic parsing for `/commitme`, `/commitme --confirm`, and `/commitme help`.
 
 The parser should be pure and testable. Unknown flags should produce clear feedback.
 
 #### Acceptance criteria
 
-- No flags result in draft mode.
-- `--commit` enables commit-all mode.
-- `--confirm` enables confirmation but does not imply commit mode unless the final design explicitly chooses otherwise.
+- No flags result in commit-all mode.
+- `--confirm` enables confirmation for commit mode.
+- `help`, `--help`, and `-h` show usage without git or model work.
 - Unknown flags are rejected with a useful message.
 - Parser tests cover valid and invalid inputs.
 
 ### 4. Implement git repository detection and command wrapper
 
-- [ ] Implement safe local git command helpers using `pi.exec("git", args, options)`.
+- [x] Implement safe local git command helpers using `pi.exec("git", args, options)`.
 
 Do not use shell-string interpolation. Return structured errors for non-git repositories and failed git commands.
 
@@ -87,7 +87,7 @@ Do not use shell-string interpolation. Return structured errors for non-git repo
 
 ### 5. Implement git change context gathering
 
-- [ ] Gather branch, status, staged diff summary, unstaged diff summary, changed file names/status, and bounded diff excerpts.
+- [x] Gather branch, status, staged diff summary, unstaged diff summary, changed file names/status, and bounded diff excerpts.
 
 Use both staged and unstaged changes. Keep outputs compact and structured.
 
@@ -102,7 +102,7 @@ Use both staged and unstaged changes. Keep outputs compact and structured.
 
 ### 6. Implement project context selection
 
-- [ ] Read relevant project metadata and safe snippets from changed files.
+- [x] Read relevant project metadata and safe snippets from changed files.
 
 Prioritize files that help explain intent. Avoid sensitive files and generated directories.
 
@@ -116,7 +116,7 @@ Prioritize files that help explain intent. Avoid sensitive files and generated d
 
 ### 7. Implement truncation utilities
 
-- [ ] Add truncation helpers for line and byte limits with explicit metadata.
+- [x] Add truncation helpers for line and byte limits with explicit metadata.
 
 The agent must be told when output was truncated.
 
@@ -129,7 +129,7 @@ The agent must be told when output was truncated.
 
 ### 8. Implement the Conventional Commit prompt builder
 
-- [ ] Build a compact deterministic prompt from git context and project context.
+- [x] Build a compact deterministic prompt from git context and project context.
 
 Optimize for weaker/local models by using simple sections and a strict output contract.
 
@@ -144,7 +144,7 @@ Optimize for weaker/local models by using simple sections and a strict output co
 
 ### 9. Implement the `commitme` Pi tool
 
-- [ ] Register the `commitme` tool with TypeBox schema, prompt metadata, gather behavior, and structured details.
+- [x] Register the `commitme` tool with TypeBox schema, prompt metadata, gather behavior, and structured details.
 
 Use `StringEnum` from `@earendil-works/pi-ai` for action enum fields if actions are represented as strings.
 
@@ -157,24 +157,24 @@ Use `StringEnum` from `@earendil-works/pi-ai` for action enum fields if actions 
 - Tool throws for real execution errors rather than returning fake success.
 - Typecheck passes.
 
-### 10. Implement the `/commitme` draft command flow
+### 10. Implement the `/commitme` command flow
 
-- [ ] Register `/commitme` so it gathers context and sends a compact prompt to the active Pi LLM provider for a draft commit message.
+- [x] Register `/commitme` so it gathers context, sends a compact prompt to the active Pi LLM provider, and creates a commit.
 
-Draft mode must not mutate files or git state.
+Tool gather mode remains the read-only path.
 
 #### Acceptance criteria
 
 - `/commitme` is registered with a clear description.
 - Running `/commitme` gathers both staged and unstaged context.
-- Running `/commitme` does not run `git add`, `git commit`, or other mutating git commands.
+- Running `/commitme` runs `git add -A` and `git commit` only after a generated message exists.
 - The generated prompt follows the prompt builder output.
 - User-visible feedback is concise.
 - Manual smoke test confirms the command appears in Pi.
 
 ### 11. Implement commit message extraction/validation
 
-- [ ] Validate the generated commit message before using it for commit mode.
+- [x] Validate the generated commit message before using it for commit mode.
 
 The validation should accept a Conventional Commit subject with optional body and reject empty or clearly malformed messages.
 
@@ -188,13 +188,13 @@ The validation should accept a Conventional Commit subject with optional body an
 
 ### 12. Implement commit-all behavior
 
-- [ ] Implement `--commit` behavior to stage all changes and create the commit with the generated message.
+- [x] Implement `/commitme` behavior to stage all changes and create the commit with the generated message.
 
 This task introduces git mutation. Do not push.
 
 #### Acceptance criteria
 
-- `--commit` runs `git add -A` before `git commit`.
+- `/commitme` runs `git add -A` before `git commit`.
 - Commit subject/body are passed safely to git without shell interpolation.
 - Successful commits report the commit hash or concise success message.
 - Failures return useful errors, including no-changes and git hook failures.
@@ -203,20 +203,20 @@ This task introduces git mutation. Do not push.
 
 ### 13. Implement optional confirmation
 
-- [ ] Implement `--confirm` so commit mode asks the user before staging/committing when UI is available.
+- [x] Implement `--confirm` so commit mode asks the user before staging/committing when UI is available.
 
 Default commit mode should not ask unless `--confirm` is set, per approved brief.
 
 #### Acceptance criteria
 
-- `/commitme --commit --confirm` prompts before mutation in UI-capable modes.
+- `/commitme --confirm` prompts before mutation in UI-capable modes.
 - Canceling the confirmation prevents `git add -A` and `git commit`.
-- `/commitme --commit` does not prompt by default.
+- `/commitme` does not prompt by default.
 - Non-UI mode behavior is documented and tested or clearly handled.
 
 ### 14. Add concise rendering/status polish
 
-- [ ] Add minimal user feedback for gather/draft/commit progress without complex custom UI.
+- [x] Add minimal user feedback for gather/draft/commit progress without complex custom UI.
 
 Keep the extension fast and unobtrusive.
 
@@ -229,7 +229,7 @@ Keep the extension fast and unobtrusive.
 
 ### 15. Add full test coverage for core behavior
 
-- [ ] Add tests for pure helpers, git context, prompt building, tool schema expectations, and commit behavior.
+- [x] Add tests for pure helpers, git context, prompt building, tool schema expectations, and commit behavior.
 
 Prefer deterministic fixtures and temporary repositories.
 
@@ -245,20 +245,20 @@ Prefer deterministic fixtures and temporary repositories.
 
 ### 16. Update documentation for implemented behavior
 
-- [ ] Update README, SECURITY, CHANGELOG, and docs/STRUCTURE after implementation.
+- [x] Update README, SECURITY, CHANGELOG, and docs/STRUCTURE after implementation.
 
 Remove preparation-only language once features are implemented.
 
 #### Acceptance criteria
 
-- README documents install/load, `/commitme`, `--commit`, and `--confirm` usage.
+- README documents install/load, `/commitme`, `/commitme --confirm`, and `/commitme help` usage.
 - SECURITY documents local git/file reads, commit mutation, no push, no telemetry, and no non-LLM network APIs.
 - CHANGELOG has an entry for implemented CommitMe behavior.
 - docs/STRUCTURE matches actual files.
 
 ### 17. Run validation and isolated smoke test
 
-- [ ] Run all agreed validation checks and manually verify isolated Pi loading.
+- [x] Run all agreed validation checks and manually verify isolated Pi loading.
 
 Use isolated loading so other configured extensions do not interfere.
 
@@ -282,8 +282,8 @@ Use isolated loading so other configured extensions do not interfere.
 ## Acceptance Criteria
 
 - All tasks above are completed one checkbox at a time in a later implementation session.
-- CommitMe drafts Conventional Commit messages from both staged and unstaged changes.
-- CommitMe can stage all changes and commit when `--commit` is used.
+- CommitMe creates Conventional Commit messages from both staged and unstaged changes.
+- CommitMe stages all changes and commits when `/commitme` is used.
 - Commit confirmation happens only when `--confirm` is used.
 - The extension remains fast, simple, and safe.
 

@@ -1,7 +1,138 @@
-/**
- * Planned shared CommitMe domain types.
- *
- * TODO(implementation session): define serializable types for command options,
- * git context, project context, prompt inputs, truncation metadata, and commit
- * results.
- */
+import type { CONVENTIONAL_COMMIT_TYPES } from "./constants.ts";
+
+export type ConventionalCommitType = (typeof CONVENTIONAL_COMMIT_TYPES)[number];
+export type CommitMeMode = "commit" | "help";
+export type GitChangeScope = "staged" | "unstaged";
+export type TruncationStrategy = "head" | "tail";
+export type ProjectContextEntryKind = "metadata" | "changed-file-snippet";
+export type SkippedContextReason =
+  | "sensitive"
+  | "generated"
+  | "binary"
+  | "missing"
+  | "too-large"
+  | "unreadable"
+  | "outside-repository";
+
+export interface CommitMeCommandOptions {
+  mode: CommitMeMode;
+  confirm: boolean;
+  rawArgs: string;
+}
+
+export type CommitMeParseResult =
+  | { ok: true; options: CommitMeCommandOptions }
+  | { ok: false; error: string; unknownFlags: string[] };
+
+export interface CommitMeExecOptions {
+  cwd?: string;
+  timeout?: number;
+  signal?: AbortSignal;
+}
+
+export interface CommitMeExecResult {
+  stdout: string;
+  stderr: string;
+  code: number;
+  killed: boolean;
+}
+
+export interface CommitMeExecutor {
+  exec(command: string, args: string[], options?: CommitMeExecOptions): Promise<CommitMeExecResult>;
+}
+
+export interface TruncationMetadata {
+  truncated: boolean;
+  strategy: TruncationStrategy;
+  originalBytes: number;
+  outputBytes: number;
+  originalLines: number;
+  outputLines: number;
+  label?: string;
+}
+
+export interface TruncatedText {
+  text: string;
+  metadata: TruncationMetadata;
+  notice?: string;
+}
+
+export interface ChangedFile {
+  path: string;
+  status: string;
+  scope: GitChangeScope;
+  sensitive: boolean;
+  generated: boolean;
+  binary: boolean;
+  secretContent?: boolean;
+}
+
+export interface GitDiffSummary {
+  scope: GitChangeScope;
+  stat: string;
+  excerpt: string;
+  truncation: TruncationMetadata;
+}
+
+export interface ProjectContextEntry {
+  path: string;
+  kind: ProjectContextEntryKind;
+  content: string;
+  truncation: TruncationMetadata;
+}
+
+export interface SkippedProjectContextEntry {
+  path: string;
+  reason: SkippedContextReason;
+}
+
+export interface ProjectContext {
+  root: string;
+  metadata: ProjectContextEntry[];
+  changedFileSnippets: ProjectContextEntry[];
+  skipped: SkippedProjectContextEntry[];
+}
+
+export interface GitContext {
+  repositoryRoot: string;
+  branch: string;
+  isDetachedHead: boolean;
+  statusPorcelain: string;
+  staged: GitDiffSummary;
+  unstaged: GitDiffSummary;
+  changedFiles: ChangedFile[];
+  project: ProjectContext;
+  hasChanges: boolean;
+  warnings: string[];
+}
+
+export interface CommitMessageValidationOk {
+  ok: true;
+  subject: string;
+  body: string;
+  message: string;
+}
+
+export type CommitMessageValidationResult =
+  | CommitMessageValidationOk
+  | { ok: false; error: string };
+
+export interface CommitResult {
+  commitHash: string;
+  subject: string;
+  body: string;
+  stdout: string;
+  stderr: string;
+}
+
+export interface CommitMeToolDetails {
+  action: "gather" | "commit" | "help";
+  repositoryRoot?: string;
+  branch?: string;
+  statusPorcelain?: string;
+  hasChanges?: boolean;
+  changedFiles?: ChangedFile[];
+  truncation?: TruncationMetadata[];
+  warnings?: string[];
+  committed?: CommitResult;
+}

@@ -68,7 +68,7 @@ Use these files to complete the task:
 
 | Surface | Name | Responsibility |
 | --- | --- | --- |
-| Slash command | `/commitme` | Primary user entrypoint. Drafts by default; commits with `--commit`; confirms only with `--confirm`. |
+| Slash command | `/commitme` | Primary user entrypoint. Commits by default; confirms only with `--confirm`; shows usage with `help`. |
 | Tool | `commitme` | LLM-callable tool that gathers commit context and can perform the final commit action when explicitly requested by the command/agent. |
 | Events | none initially | Avoid background behavior and long-lived resources. |
 | UI | confirmation dialog | Only used when `--confirm` is present and UI is available. |
@@ -83,13 +83,10 @@ wait for idle if needed
 collect context with includeStaged=true and includeUnstaged=true
 build deterministic prompt
 send prompt to active Pi model
-if --commit:
-  extract/receive selected commit message
-  if --confirm and UI available: ask user
-  run git add -A
-  run git commit -m subject [-m body]
-else:
-  show/send drafted message only
+extract/receive selected commit message
+if --confirm and UI available: ask user
+run git add -A
+run git commit -m subject [-m body]
 ```
 
 The implementation must use Pi-supported APIs such as `pi.registerCommand`, `pi.sendUserMessage`, `ctx.ui.confirm`, and `pi.exec` rather than shelling out through unrelated process helpers.
@@ -198,8 +195,8 @@ The command/tool should bias toward a single high-quality result instead of mult
 ### Security boundaries
 
 - Local shell execution is limited to `git` commands through `pi.exec`.
-- Draft mode must not mutate files or git state.
-- Commit mode mutates the git index and repository history with `git add -A` and `git commit`.
+- Tool gather mode must not mutate files or git state.
+- `/commitme` mutates the git index and repository history with `git add -A` and `git commit`.
 - Confirmation happens only when `--confirm` is set.
 - No telemetry and no non-LLM network APIs.
 - Do not intentionally read secrets; avoid secret-like files and binary files in context extraction.
@@ -239,8 +236,8 @@ Key rules to preserve:
 ## Acceptance Criteria
 
 - Architecture separates Pi registration, git operations, prompt building, truncation, and commit execution.
-- Draft mode is read-only.
-- Commit mode stages all changes and commits only when explicitly requested.
+- Tool gather mode is read-only.
+- Commit mode stages all changes and commits only when explicitly requested through `/commitme` or tool commit action.
 - Confirmation is controlled by `--confirm`.
 - Output is compact enough for weaker/local models.
 - Security-sensitive behavior is documented.

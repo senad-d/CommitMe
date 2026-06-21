@@ -1,11 +1,26 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 
 async function readProjectFile(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
+}
+
+async function readSourceTree(dir = "src") {
+  const base = new URL(`../${dir}/`, import.meta.url);
+  const entries = await readdir(base, { withFileTypes: true });
+  const chunks = [];
+  for (const entry of entries) {
+    const relative = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) {
+      chunks.push(await readSourceTree(relative));
+    } else if (entry.isFile() && entry.name.endsWith(".ts")) {
+      chunks.push(await readProjectFile(relative));
+    }
+  }
+  return chunks.join("\n");
 }
 
 test("package declares CommitMe identity and Pi extension entry file", async () => {
@@ -30,20 +45,23 @@ test("required preparation specs exist", async () => {
   await access(new URL("../specs/spec-tasks.md", import.meta.url));
 });
 
-test("task spec keeps implementation checkboxes unchecked during preparation", async () => {
+test("task spec tracks implementation progress", async () => {
   const taskSpec = await readProjectFile("specs/spec-tasks.md");
-  assert.match(taskSpec, /- \[ \] /);
-  assert.doesNotMatch(taskSpec, /- \[x\] /i);
+  assert.match(taskSpec, /- \[[ x]\] /i);
+  assert.doesNotMatch(taskSpec, /preparation session is complete/i);
 });
 
-test("prepared extension does not register runtime command or tool behavior", async () => {
+test("extension entry point delegates to command and tool registration modules", async () => {
   const extension = await readProjectFile("src/extension.ts");
-  const command = await readProjectFile("src/commands/commitme-command.ts");
-  const tool = await readProjectFile("src/tools/commitme-tool.ts");
 
   assert.match(extension, /commitMeExtension/);
-  assert.doesNotMatch(extension, /registerCommand\s*\(/);
-  assert.doesNotMatch(extension, /registerTool\s*\(/);
-  assert.doesNotMatch(command, /registerCommand\s*\(/);
-  assert.doesNotMatch(tool, /registerTool\s*\(/);
+  assert.match(extension, /registerCommitMeCommand\(pi\)/);
+  assert.match(extension, /registerCommitMeTool\(pi\)/);
+});
+
+test("implementation avoids background resources and custom widgets", async () => {
+  const source = await readSourceTree();
+
+  assert.doesNotMatch(source, /setInterval|setTimeout|watch\(|createServer|listen\(/);
+  assert.doesNotMatch(source, /setWidget\(|ui\.custom\(/);
 });

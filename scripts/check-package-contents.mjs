@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-const hiddenEnvironmentFilePattern = /^\.env(?:$|\.)/;
+const hiddenEnvironmentFilePattern = /(^|\/)\.env(?:$|\.)/;
 
 const forbiddenChecks = [
   { label: "environment files", test: (path) => hiddenEnvironmentFilePattern.test(path) },

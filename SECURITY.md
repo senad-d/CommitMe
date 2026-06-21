@@ -9,19 +9,21 @@ pi install npm:@senad-d/commitme@<version>
 pi install git:https://github.com/senad-d/commitme@<tag>
 ```
 
-## Planned security behavior
+## Runtime security behavior
 
-Runtime feature implementation is pending. The approved design requires these boundaries:
-
-- Draft mode reads local git and project context only.
-- Commit mode is explicit via `/commitme --commit`.
-- Commit mode stages all changes with `git add -A` and creates a local git commit.
-- Confirmation is requested only when `--confirm` is set.
-- CommitMe must never run `git push`.
-- CommitMe must not send telemetry.
-- CommitMe must not call non-LLM network APIs.
-- CommitMe must avoid intentionally reading secret files such as `.env` files, private keys, and credential stores.
-- CommitMe uses the active Pi LLM provider through Pi for message drafting.
+- `/commitme` is an explicit user-triggered commit command: it reads git/project context, drafts a bounded message prompt with the active Pi LLM provider, stages all changes with `git add -A`, and creates a local git commit with `git commit`.
+- `/commitme --confirm` requests confirmation before staging and committing.
+- Tool `action: "gather"` is read-only and returns compact commit context.
+- Tool `action: "commit"` requires an explicit final message and creates a local commit.
+- Commit actions abort before staging if known secret files or high-confidence secret tokens would be committed, or if git status changes after context gathering.
+- Confirmation is requested only when `--confirm` or tool `confirm: true` is set.
+- CommitMe never runs `git push`.
+- CommitMe does not send telemetry.
+- CommitMe does not call non-LLM network APIs.
+- CommitMe uses only the active Pi LLM provider for command message drafting.
+- CommitMe avoids intentionally reading secret files such as `.env`, `.envrc`, private keys, kubeconfigs, and credential stores.
+- Sensitive, generated, binary, unreadable, overly large, or secret-like changed files may be listed by path/status but their contents are omitted from model context.
+- Diff excerpts are filtered through path checks, content checks, and line-level redaction before they are sent to the active Pi LLM provider.
 
 ## Reporting vulnerabilities
 

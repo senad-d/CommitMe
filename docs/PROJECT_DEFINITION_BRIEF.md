@@ -14,7 +14,7 @@ Approved during preparation on 2026-06-21.
 - Display name: `CommitMe`
 - Exported extension function: `commitMeExtension`
 - Repository URL: `https://github.com/senad-d/commitme` assumed until corrected.
-- One-sentence pitch: CommitMe quickly gathers git diff and project context so even weaker/local models can draft or create clear Conventional Commit messages.
+- One-sentence pitch: CommitMe quickly gathers git diff and project context so even weaker/local models can draft or create clear Lightweight Conventional Commit messages.
 
 ## 3. Users and use cases
 
@@ -33,9 +33,8 @@ Approved during preparation on 2026-06-21.
 
 | Surface | Name | Purpose | Notes |
 | --- | --- | --- | --- |
-| Command | `/commitme` | Gather context and ask the LLM for a commit message | Planned, not implemented during preparation |
-| Command flag | `--commit` | Stage all changes and commit using the generated message | Planned |
-| Command flag | `--confirm` | Ask for confirmation before committing | Planned; default is no confirmation |
+| Command | `/commitme` | Gather context, ask the LLM for a commit message, and create a local commit | Implemented after preparation |
+| Command flag | `--confirm` | Ask for confirmation before committing | Implemented after preparation; default is no confirmation |
 | Tool | `commitme` | Gather commit context and/or perform final git commit action | Planned |
 | Event | none initially | No background behavior | Avoid long-lived resources |
 | UI | confirmation dialog only | Used only when `--confirm` is set | No custom UI |
@@ -65,8 +64,8 @@ Approved during preparation on 2026-06-21.
 - Config source: none initially.
 - Session state: no persistent state; tool result `details` can store branch, changed files, and truncation metadata.
 - Files written:
-  - None for draft mode.
-  - Git index and git commit object when commit mode runs.
+  - None for tool gather mode.
+  - Git index and git commit object when `/commitme` or tool commit mode runs.
 - Cleanup behavior: no long-lived resources.
 
 ## 7. Security and privacy
@@ -102,13 +101,12 @@ Approved during preparation on 2026-06-21.
   - Confirm repository URL: `https://github.com/senad-d/commitme`?
   - Confirm security contact before public publishing.
 - Assumptions:
-  - `/commitme` drafts only.
-  - `/commitme --commit` stages all changes and commits without confirmation.
-  - `/commitme --commit --confirm` asks before `git add -A` and `git commit`.
+  - `/commitme` stages all changes and commits without confirmation.
+  - `/commitme --confirm` asks before `git add -A` and `git commit`.
   - Tool name is exactly `commitme`.
   - MIT license is retained from the template.
 - Decisions:
   - Optimize for speed and weaker/local models.
   - Gather both staged and unstaged changes.
-  - Use Conventional Commit format.
+  - Use the team Lightweight Conventional Commits standard.
   - No telemetry or non-LLM network calls.
