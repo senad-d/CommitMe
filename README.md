@@ -65,16 +65,16 @@ pi
 Start with confirmation enabled:
 
 ```text
-/commitme --confirm
+/commitme --confirm focus the message on the command steering support
 ```
 
 When you are comfortable with the workflow, run the fast path:
 
 ```text
-/commitme
+/commitme focus the message on the command steering support
 ```
 
-CommitMe will gather the current repository changes, ask your active pi model for a Lightweight Conventional Commit message, stage all changes with `git add -A`, and create a local commit. It never pushes.
+CommitMe will gather the current repository changes, ask your active pi model for a Lightweight Conventional Commit message, stage all changes with `git add -A`, and create a local commit. Optional steering text after the command guides the model when it matches the actual git changes. CommitMe never pushes.
 
 ---
 
@@ -111,8 +111,9 @@ pi install /absolute/path/to/commitme
 Inside a git repository, run one of these in pi:
 
 ```text
-/commitme --confirm
-/commitme
+/commitme --confirm focus on the bug fix
+/commitme add steering support for commit generation
+/commitme -- --prefer feat if accurate
 /commitme help
 ```
 
@@ -120,11 +121,11 @@ Recommended first run:
 
 1. Review your working tree with `git status`.
 2. Start pi in the repository.
-3. Run `/commitme --confirm`.
+3. Run `/commitme --confirm`, optionally followed by steering text.
 4. Review the generated message in the confirmation dialog.
 5. Confirm to stage all changes and create the commit.
 
-Use `/commitme` only when you are comfortable with CommitMe creating the commit immediately after drafting the message.
+Use `/commitme` only when you are comfortable with CommitMe creating the commit immediately after drafting the message. Add steering text when you know the intent and want the model to prefer your wording while still checking the git context.
 
 ---
 
@@ -156,6 +157,8 @@ Reload your shell and use it from any git repository:
 ```bash
 source ~/.zshrc
 commit
+commit focus on the parser and prompt-builder changes
+commit -- --prefer feat when accurate
 commit help
 ```
 
@@ -173,8 +176,9 @@ Notes:
 
 | Command | Description |
 | --- | --- |
-| `/commitme` | Generate a message, stage all changes with `git add -A`, and create a local commit. |
-| `/commitme --confirm` | Generate a message, ask for confirmation, then commit only if you approve. |
+| `/commitme [steering prompt]` | Generate a message, stage all changes with `git add -A`, and create a local commit. Optional steering guides wording, emphasis, type, and scope when supported by the git context. |
+| `/commitme --confirm [steering prompt]` | Generate a message, ask for confirmation, then commit only if you approve. |
+| `/commitme -- --steering that starts with a dash` | Use `--` before steering text that begins with `-` or `--`. |
 | `/commitme help` | Show in-session help. `/commitme --help` and `/commitme -h` also work. |
 
 CommitMe waits for the current agent turn to finish before it gathers context. It aborts when there are no staged or unstaged changes.
@@ -187,7 +191,7 @@ CommitMe also registers a `commitme` tool for agents.
 
 | Tool action | Behavior |
 | --- | --- |
-| `action: "gather"` | Read-only. Returns compact git/project context and a commit-message prompt. |
+| `action: "gather"` | Read-only. Returns compact git/project context and a commit-message prompt. Accepts optional `steeringPrompt` guidance. |
 | `action: "commit"` | Requires an explicit final `message`; stages all changes and creates a local commit. |
 
 Use the tool when you want pi to draft a message without immediately committing, or when another workflow needs bounded git context.

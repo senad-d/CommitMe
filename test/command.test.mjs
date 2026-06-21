@@ -81,8 +81,9 @@ test("buildCommitMeHelpText explains commands and safety", () => {
   const help = buildCommitMeHelpText();
 
   assert.match(help, /\/commitme --confirm/);
+  assert.match(help, /steering prompt/);
   assert.match(help, /\/commitme help/);
-  assert.doesNotMatch(help, /--commit/);
+  assert.doesNotMatch(help, /--commit\b/);
   assert.match(help, /never runs `git push`/);
   assert.match(help, /Lightweight Conventional Commit/);
 });
@@ -156,6 +157,30 @@ test("/commitme creates a commit without prompting by default", async () => {
     assert.equal(messages[0].details.action, "commit");
     assert.equal(notifications.some((notice) => /committed/.test(notice.message)), false);
     assert.ok(calls.some((call) => call.args.join(" ") === "add -A"));
+  });
+});
+
+test("/commitme includes steering prompt in model context", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+
+    const messages = [];
+    const registered = new Map();
+    const pi = createPi([], messages, registered);
+    registerCommitMeCommand(pi, {
+      draftCommitMessage: async (prompt) => {
+        assert.match(prompt, /User steering prompt:/);
+        assert.match(prompt, /prefer wording around command steering support/);
+        return "feat(commitme): add command steering support";
+      },
+    });
+
+    await registered
+      .get("commitme")
+      .handler("--confirm prefer wording around command steering support", createCtx(dir, [], async () => true));
+
+    assert.equal(messages[0].details.action, "commit");
+    assert.equal(messages[0].details.steeringPrompt, "prefer wording around command steering support");
   });
 });
 

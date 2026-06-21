@@ -61,6 +61,7 @@ test("registerCommitMeTool registers the commitme tool", () => {
   assert.ok(registered[0].promptGuidelines.every((guideline) => guideline.includes("commitme")));
   assert.match(JSON.stringify(registered[0].parameters), /gather/);
   assert.match(JSON.stringify(registered[0].parameters), /commit/);
+  assert.match(JSON.stringify(registered[0].parameters), /steeringPrompt/);
 });
 
 test("commitme tool gathers compact context with structured details", async () => {
@@ -79,6 +80,25 @@ test("commitme tool gathers compact context with structured details", async () =
     assert.equal(result.details.hasChanges, true);
     assert.ok(result.details.changedFiles.some((file) => file.path === "feature.ts"));
     assert.ok(Array.isArray(result.details.truncation));
+  });
+});
+
+test("commitme tool includes steering prompt in gathered context", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+
+    const tool = createCommitMeTool(createExecutor());
+    const result = await tool.execute(
+      "tool-call",
+      { action: "gather", steeringPrompt: "focus on tool steering support" },
+      undefined,
+      undefined,
+      { cwd: dir },
+    );
+
+    assert.match(result.content[0].text, /User steering prompt:/);
+    assert.match(result.content[0].text, /focus on tool steering support/);
+    assert.equal(result.details.steeringPrompt, "focus on tool steering support");
   });
 });
 

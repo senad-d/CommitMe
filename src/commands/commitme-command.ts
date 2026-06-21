@@ -8,7 +8,6 @@ import { gatherGitContext } from "../git/context.ts";
 import { buildBoundedCommitPrompt } from "../prompt/build-commit-prompt.ts";
 import type { CommitMeParseResult, CommitMeToolDetails } from "../types.ts";
 
-const KNOWN_FLAGS = new Set(["--commit", "--confirm", "--help", "-h"]);
 const HELP_FLAGS = new Set(["--help", "-h"]);
 const HELP_COMMAND = "help";
 
@@ -18,14 +17,39 @@ export interface RegisterCommitMeCommandOptions {
   draftCommitMessage?: DraftCommitMessage;
 }
 
+interface CommitMeArgToken {
+  text: string;
+  lowerText: string;
+  start: number;
+  end: number;
+}
+
+function tokenizeCommitMeArgs(raw: string): CommitMeArgToken[] {
+  return Array.from(raw.matchAll(/\S+/g), (match) => {
+    const text = match[0];
+    const start = match.index ?? 0;
+    return {
+      text,
+      lowerText: text.toLowerCase(),
+      start,
+      end: start + text.length,
+    };
+  });
+}
+
+function helpCommandWasRequested(tokens: CommitMeArgToken[]): boolean {
+  const firstToken = tokens[0];
+  if (!firstToken) return false;
+  if (HELP_FLAGS.has(firstToken.lowerText)) return true;
+  if (firstToken.lowerText !== HELP_COMMAND) return false;
+  return tokens.slice(1).every((token) => token.text.startsWith("-"));
+}
+
 export function parseCommitMeArgs(rawArgs: string): CommitMeParseResult {
   const raw = rawArgs.trim();
-  const tokens = raw.length === 0 ? [] : raw.split(/\s+/);
-  const unknownFlags = tokens.filter((token) => token.startsWith("-") && !KNOWN_FLAGS.has(token));
-  const positional = tokens.filter((token) => !token.startsWith("-"));
+  const tokens = tokenizeCommitMeArgs(raw);
 
-  const firstToken = tokens[0]?.toLowerCase();
-  if (tokens.some((token) => HELP_FLAGS.has(token.toLowerCase())) || firstToken === HELP_COMMAND) {
+  if (helpCommandWasRequested(tokens)) {
     return {
       ok: true,
       options: {
@@ -36,28 +60,67 @@ export function parseCommitMeArgs(rawArgs: string): CommitMeParseResult {
     };
   }
 
-  if (unknownFlags.length > 0) {
-    return {
-      ok: false,
-      error: `Unknown ${unknownFlags.length === 1 ? "flag" : "flags"}: ${unknownFlags.join(", ")}`,
-      unknownFlags,
-    };
+  let confirm = false;
+  let tokenIndex = 0;
+  while (tokenIndex < tokens.length) {
+    const token = tokens[tokenIndex];
+    if (!token) break;
+
+    if (token.text === "--") {
+      const steeringPrompt = raw.slice(token.end).trim();
+      return {
+        ok: true,
+        options: {
+          mode: "commit",
+          confirm,
+          rawArgs,
+          ...(steeringPrompt ? { steeringPrompt } : {}),
+        },
+      };
+    }
+
+    if (HELP_FLAGS.has(token.lowerText)) {
+      return {
+        ok: true,
+        options: {
+          mode: "help",
+          confirm: false,
+          rawArgs,
+        },
+      };
+    }
+
+    if (token.text === "--commit") {
+      tokenIndex += 1;
+      continue;
+    }
+
+    if (token.text === "--confirm") {
+      confirm = true;
+      tokenIndex += 1;
+      continue;
+    }
+
+    if (token.text.startsWith("-")) {
+      return {
+        ok: false,
+        error: `Unknown flag: ${token.text}`,
+        unknownFlags: [token.text],
+      };
+    }
+
+    break;
   }
 
-  if (positional.length > 0) {
-    return {
-      ok: false,
-      error: `Unexpected argument${positional.length === 1 ? "" : "s"}: ${positional.join(" ")}`,
-      unknownFlags: positional,
-    };
-  }
+  const steeringPrompt = tokenIndex < tokens.length ? raw.slice(tokens[tokenIndex]?.start ?? raw.length).trim() : "";
 
   return {
     ok: true,
     options: {
       mode: "commit",
-      confirm: tokens.includes("--confirm"),
+      confirm,
       rawArgs,
+      ...(steeringPrompt ? { steeringPrompt } : {}),
     },
   };
 }
@@ -144,11 +207,15 @@ export function buildCommitMeHelpText(): string {
     "",
     "## Commands",
     "",
-    "### /commitme",
+    "### /commitme [steering prompt]",
     "Generates a commit message, stages all changes with `git add -A`, and creates a local git commit.",
+    "Optional steering text guides the draft when it matches the actual git changes.",
     "",
-    "### /commitme --confirm",
+    "### /commitme --confirm [steering prompt]",
     "Generates a commit message, shows a confirmation prompt with that message, and commits only if you confirm.",
+    "",
+    "### /commitme -- --steering that starts with a dash",
+    "Use `--` before steering text that begins with `-` or `--`.",
     "",
     "### /commitme help",
     "Shows this help panel. `/commitme --help` and `/commitme -h` work too.",
@@ -226,9 +293,10 @@ export function registerCommitMeCommand(pi: ExtensionAPI, options: RegisterCommi
       }
       assertNoUnsafeCommitFiles(gitContext.changedFiles);
 
-      const prompt = buildBoundedCommitPrompt(gitContext);
+      const prompt = buildBoundedCommitPrompt(gitContext, { steeringPrompt: parsed.options.steeringPrompt });
       const draft = await draftCommitMessage(prompt.text, ctx);
       const details = createCommitMeDetails("gather", gitContext, {
+        ...(parsed.options.steeringPrompt ? { steeringPrompt: parsed.options.steeringPrompt } : {}),
         truncation: [...collectGitContextTruncation(gitContext), prompt.truncation],
       });
 

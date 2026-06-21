@@ -59,15 +59,39 @@ test("parseCommitMeArgs accepts legacy commit with confirmation", () => {
   assert.equal(parsed.options.confirm, true);
 });
 
-test("parseCommitMeArgs rejects unknown flags", () => {
+test("parseCommitMeArgs rejects unknown flags before steering text", () => {
   const parsed = parseCommitMeArgs("--commit --push");
   assert.equal(parsed.ok, false);
   assert.match(parsed.error, /Unknown flag/);
   assert.deepEqual(parsed.unknownFlags, ["--push"]);
 });
 
-test("parseCommitMeArgs rejects positional arguments", () => {
-  const parsed = parseCommitMeArgs("please commit");
-  assert.equal(parsed.ok, false);
-  assert.match(parsed.error, /Unexpected arguments/);
+test("parseCommitMeArgs accepts steering prompt text", () => {
+  const parsed = parseCommitMeArgs("please focus on the parser change");
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.options.mode, "commit");
+  assert.equal(parsed.options.confirm, false);
+  assert.equal(parsed.options.steeringPrompt, "please focus on the parser change");
+});
+
+test("parseCommitMeArgs accepts steering prompt after flags", () => {
+  const parsed = parseCommitMeArgs("--commit --confirm please focus on the parser change");
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.options.mode, "commit");
+  assert.equal(parsed.options.confirm, true);
+  assert.equal(parsed.options.steeringPrompt, "please focus on the parser change");
+});
+
+test("parseCommitMeArgs treats flags after steering text as steering text", () => {
+  const parsed = parseCommitMeArgs("please mention --confirm support");
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.options.steeringPrompt, "please mention --confirm support");
+});
+
+test("parseCommitMeArgs accepts dash-prefixed steering after separator", () => {
+  const parsed = parseCommitMeArgs("--confirm -- --prefer feat if accurate");
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.options.mode, "commit");
+  assert.equal(parsed.options.confirm, true);
+  assert.equal(parsed.options.steeringPrompt, "--prefer feat if accurate");
 });

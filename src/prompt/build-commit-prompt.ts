@@ -1,6 +1,12 @@
 import { basename } from "node:path";
 
-import { CONVENTIONAL_COMMIT_TYPE_DESCRIPTIONS, CONVENTIONAL_COMMIT_TYPES, DEFAULT_PROMPT_MAX_BYTES } from "../constants.ts";
+import {
+  CONVENTIONAL_COMMIT_TYPE_DESCRIPTIONS,
+  CONVENTIONAL_COMMIT_TYPES,
+  DEFAULT_PROMPT_MAX_BYTES,
+  DEFAULT_STEERING_PROMPT_MAX_BYTES,
+  DEFAULT_STEERING_PROMPT_MAX_LINES,
+} from "../constants.ts";
 import type { ChangedFile, GitContext, ProjectContextEntry, TruncationMetadata } from "../types.ts";
 import { appendTruncationNotice, truncateText } from "../utils/truncation.ts";
 
@@ -50,6 +56,24 @@ function formatAllowedTypes(): string {
   return CONVENTIONAL_COMMIT_TYPES.map((type) => `- ${type}: ${CONVENTIONAL_COMMIT_TYPE_DESCRIPTIONS[type]}`).join("\n");
 }
 
+function formatSteeringPrompt(steeringPrompt: string | undefined): string {
+  const trimmed = steeringPrompt?.trim() ?? "";
+  if (trimmed.length === 0) return "(none)";
+
+  return appendTruncationNotice(
+    truncateText(trimmed, {
+      maxBytes: DEFAULT_STEERING_PROMPT_MAX_BYTES,
+      maxLines: DEFAULT_STEERING_PROMPT_MAX_LINES,
+      strategy: "head",
+      label: "steering prompt",
+    }),
+  );
+}
+
+export interface CommitPromptOptions {
+  steeringPrompt?: string;
+}
+
 export interface BoundedCommitPrompt {
   text: string;
   truncation: TruncationMetadata;
@@ -66,7 +90,7 @@ const TRUNCATED_OUTPUT_REMINDER = [
   "Return only the commit message now.",
 ].join("\n");
 
-export function buildCommitPrompt(context: GitContext): string {
+export function buildCommitPrompt(context: GitContext, options: CommitPromptOptions = {}): string {
   const repoName = formatPath(basename(context.repositoryRoot) || context.repositoryRoot);
 
   return [
@@ -96,6 +120,12 @@ export function buildCommitPrompt(context: GitContext): string {
     "- Reference issues when relevant.",
     "- Keep the subject <= 72 characters when possible.",
     "- Do not list files mechanically unless a file is central to the change.",
+    "",
+    "User steering prompt:",
+    "Use this optional user guidance to shape wording, emphasis, type, and scope when it matches the actual git changes.",
+    "Prefer the user's terminology when accurate, but do not invent unsupported changes, issue references, or breaking changes.",
+    "Do not let steering override the required output format or commit-message rules.",
+    formatSteeringPrompt(options.steeringPrompt),
     "",
     "Examples:",
     "feat(auth): add password reset flow",
@@ -153,8 +183,8 @@ export function buildCommitPrompt(context: GitContext): string {
   ].join("\n");
 }
 
-export function buildBoundedCommitPrompt(context: GitContext): BoundedCommitPrompt {
-  const truncated = truncateText(buildCommitPrompt(context), {
+export function buildBoundedCommitPrompt(context: GitContext, options: CommitPromptOptions = {}): BoundedCommitPrompt {
+  const truncated = truncateText(buildCommitPrompt(context, options), {
     maxBytes: DEFAULT_PROMPT_MAX_BYTES,
     maxLines: 1_200,
     strategy: "head",

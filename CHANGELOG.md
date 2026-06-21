@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added optional steering prompts for `/commitme [steering prompt]` and `/commitme --confirm [steering prompt]`.
+- Added `steeringPrompt` support to the `commitme` gather tool so agent workflows can guide commit-message drafting.
+
 ## 0.1.0 - 2026-06-21
 
 - Implemented the `/commitme` command to draft a Lightweight Conventional Commit message from staged and unstaged changes, then commit with `git add -A` and `git commit`.

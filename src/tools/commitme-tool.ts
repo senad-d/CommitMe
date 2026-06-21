@@ -18,6 +18,9 @@ export const CommitMeToolParameters = Type.Object({
     }),
   ),
   message: Type.Optional(Type.String({ description: "Final Lightweight Conventional Commit message to use when action is commit." })),
+  steeringPrompt: Type.Optional(
+    Type.String({ description: "Optional user guidance to include in the gathered commit-message prompt." }),
+  ),
   confirm: Type.Optional(Type.Boolean({ description: "Ask before creating the commit when UI is available." })),
 });
 
@@ -35,14 +38,15 @@ export function createCommitMeTool(pi: ExtensionAPI) {
     name: COMMITME_TOOL_NAME,
     label: EXTENSION_DISPLAY_NAME,
     description:
-      "CommitMe gathers local git diff and project context for a Lightweight Conventional Commit message. Slash usage: /commitme commits, /commitme --confirm asks first, /commitme help shows help. Tool usage: action=gather is read-only; action=commit creates a local commit only with an explicit final message. CommitMe never pushes.",
+      "CommitMe gathers local git diff and project context for a Lightweight Conventional Commit message. Slash usage: /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] guides drafting, and /commitme help shows help. Tool usage: action=gather is read-only and can include steeringPrompt; action=commit creates a local commit only with an explicit final message. CommitMe never pushes.",
     promptSnippet: "Gather local git changes and project context for a Lightweight Conventional Commit message",
     promptGuidelines: [
       "Use commitme when the user asks for a Lightweight Conventional Commit message based on the current git diff.",
       "Use commitme instead of manually inspecting every changed file when compact git context is enough.",
       "Do not use commitme action=commit unless the user explicitly requested creating a commit and a final message is available.",
       "After commitme gathers context, draft exactly one Lightweight Conventional Commit message unless the user asks otherwise.",
-      "Tell users that /commitme commits, /commitme --confirm asks first, and /commitme help shows usage when they ask how to run CommitMe.",
+      "Pass user drafting guidance as commitme steeringPrompt when gathering context.",
+      "Tell users that /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] guides drafting, and /commitme help shows usage when they ask how to run CommitMe.",
     ],
     parameters: CommitMeToolParameters,
     executionMode: "sequential",
@@ -81,8 +85,9 @@ export function createCommitMeTool(pi: ExtensionAPI) {
       }
 
       const context = await gatherGitContext(pi, { cwd: ctx.cwd, signal });
-      const prompt = buildBoundedCommitPrompt(context);
+      const prompt = buildBoundedCommitPrompt(context, { steeringPrompt: params.steeringPrompt });
       const details = createCommitMeDetails("gather", context, {
+        ...(params.steeringPrompt ? { steeringPrompt: params.steeringPrompt } : {}),
         truncation: [...collectGitContextTruncation(context), prompt.truncation],
       });
 

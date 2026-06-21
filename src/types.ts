@@ -18,6 +18,7 @@ export interface CommitMeCommandOptions {
   mode: CommitMeMode;
   confirm: boolean;
   rawArgs: string;
+  steeringPrompt?: string;
 }
 
 export type CommitMeParseResult =
@@ -127,6 +128,7 @@ export interface CommitResult {
 
 export interface CommitMeToolDetails {
   action: "gather" | "commit" | "help";
+  steeringPrompt?: string;
   repositoryRoot?: string;
   branch?: string;
   statusPorcelain?: string;

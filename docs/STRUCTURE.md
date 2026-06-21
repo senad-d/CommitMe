@@ -26,11 +26,11 @@ src/
 ## Module boundaries
 
 1. `src/extension.ts` imports registration functions and calls them only.
-2. `src/commands/commitme-command.ts` parses flags, serves `/commitme help`, gathers context, calls the active Pi model, and commits (`--confirm` asks first).
-3. `src/tools/commitme-tool.ts` exposes gather/commit behavior to the agent with structured `details`.
+2. `src/commands/commitme-command.ts` parses flags and optional steering text, serves `/commitme help`, gathers context, calls the active Pi model, and commits (`--confirm` asks first).
+3. `src/tools/commitme-tool.ts` exposes gather/commit behavior to the agent with structured `details`, including optional gather-time steering guidance.
 4. `src/git/context.ts` reads git status/diff data, project metadata, and safe file snippets.
 5. `src/git/commit.ts` validates Lightweight Conventional Commit messages, stages with `git add -A`, and commits with `git commit`.
-6. `src/prompt/build-commit-prompt.ts` formats weak-model-friendly prompt sections, bounds final prompt size, and preserves the final output reminder when truncation is needed.
+6. `src/prompt/build-commit-prompt.ts` formats weak-model-friendly prompt sections, includes bounded user steering guidance, bounds final prompt size, and preserves the final output reminder when truncation is needed.
 7. `src/commitme-details.ts` keeps command and tool result metadata consistent.
 8. `src/utils/truncation.ts` enforces output limits and emits truncation metadata/notices.
 
