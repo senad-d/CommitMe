@@ -20,8 +20,10 @@
     "commit-message",
     "conventional-commits",
     "git",
+    "commit",
     "commitme",
-    "typescript"
+    "typescript",
+    "coding-agent"
   ],
   "engines": {
     "node": ">=22.19.0"
@@ -49,7 +51,8 @@
   "pi": {
     "extensions": [
       "./src/extension.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/senad-d/commitme/main/img/commitme.png"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

@@ -52,13 +52,14 @@ export function createCommitMeTool(pi: ExtensionAPI) {
 
       if (action === "commit") {
         const message = requireCommitMessage(params.message);
+        if (params.confirm && !ctx.hasUI) {
+          throw new Error("commitme confirm=true requires a UI-capable Pi mode.");
+        }
+
         const context = await gatherGitContext(pi, { cwd: ctx.cwd, signal });
         assertNoUnsafeCommitFiles(context.changedFiles);
 
         if (params.confirm) {
-          if (!ctx.hasUI) {
-            throw new Error("commitme confirm=true requires a UI-capable Pi mode.");
-          }
           const confirmed = await ctx.ui.confirm("CommitMe: create commit?", `Commit with this message?\n\n${message}`);
           if (!confirmed) {
             return {

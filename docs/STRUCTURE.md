@@ -50,8 +50,9 @@ src/
 - Commit mode is explicit and uses only `git add -A` plus `git commit`.
 - Optional confirmation runs only when requested.
 - There is no `git push`, telemetry, or non-LLM network API usage.
-- Secret-like, generated, binary, unreadable, and overly large file contents are filtered from context.
-- Commit actions refuse known secret files or high-confidence secret-token content before staging and abort if git status changes after context gathering.
+- Secret-like, generated, binary, unreadable, symlinked-to-sensitive, and overly large file contents are filtered from context.
+- Commit actions refuse known secret files or high-confidence secret-token content before staging, recheck current content immediately before `git add -A`, and abort if git status changes after context gathering.
+- Git diff collection disables external diff and textconv commands.
 - Git status parsing uses NUL-delimited `-uall` output internally so untracked directories, paths with spaces, and special characters are handled safely.
 
 ## Planning files

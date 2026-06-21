@@ -128,6 +128,22 @@ test("gatherGitContext captures staged-only changes", async () => {
   });
 });
 
+test("gatherGitContext disables external diff and textconv commands", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    await writeFile(join(dir, "src.ts"), "export const value = 1;\n", "utf8");
+    await git(dir, ["add", "src.ts"]);
+
+    const calls = [];
+    await gatherGitContext(createExecutor(calls), { cwd: dir });
+    const diffCalls = calls.filter((call) => call.args[0] === "diff");
+
+    assert.ok(diffCalls.length > 0);
+    assert.ok(diffCalls.every((call) => call.args.includes("--no-ext-diff")));
+    assert.ok(diffCalls.every((call) => call.args.includes("--no-textconv")));
+  });
+});
+
 test("gatherGitContext captures unstaged-only changes", async () => {
   await withTempDir(async (dir) => {
     await initRepo(dir);
@@ -398,5 +414,31 @@ test("gatherGitContext does not read symlinked changed files outside the reposit
     } finally {
       await rm(outsideDir, { recursive: true, force: true });
     }
+  });
+});
+
+test("gatherGitContext does not read symlinked changed files that target sensitive repository files", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    await writeFile(join(dir, ".env"), "DATABASE_URL=postgres://top-secret-db\n", "utf8");
+    await git(dir, ["add", ".env"]);
+    await git(dir, ["commit", "-m", "chore: add local secret fixture"]);
+
+    try {
+      await symlink(".env", join(dir, "linked-file.txt"));
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && ["EINVAL", "EPERM"].includes(error.code)) {
+        return;
+      }
+      throw error;
+    }
+    await git(dir, ["add", "linked-file.txt"]);
+
+    const context = await gatherGitContext(createExecutor(), { cwd: dir });
+    const combinedContext = JSON.stringify(context.project) + context.staged.excerpt + context.unstaged.excerpt;
+
+    assert.ok(context.changedFiles.some((file) => file.path === "linked-file.txt"));
+    assert.ok(context.project.skipped.some((entry) => entry.path === "linked-file.txt" && entry.reason === "sensitive"));
+    assert.doesNotMatch(combinedContext, /top-secret-db/);
   });
 });

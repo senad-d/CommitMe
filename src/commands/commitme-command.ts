@@ -210,6 +210,10 @@ export function registerCommitMeCommand(pi: ExtensionAPI, options: RegisterCommi
         return;
       }
 
+      if (parsed.options.confirm && !ctx.hasUI) {
+        throw new Error(`${EXTENSION_DISPLAY_NAME}: --confirm requires a UI-capable Pi mode.`);
+      }
+
       if (!ctx.isIdle()) {
         ctx.ui.notify(`${EXTENSION_DISPLAY_NAME}: waiting for the current agent turn to finish...`, "info");
         await ctx.waitForIdle();

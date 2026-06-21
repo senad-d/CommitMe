@@ -146,7 +146,10 @@ test("createCommit stages all changes and creates a commit", async () => {
     assert.match(result.commitHash, /^[0-9a-f]{7,}$/);
     assert.equal(result.subject, "feat: add feature module");
     assert.equal(stdout.trim(), "feat: add feature module");
-    assert.deepEqual(calls.slice(0, 2).map((call) => call.args.join(" ")), ["add -A", "status --porcelain=v1"]);
+    const calledArgs = calls.map((call) => call.args.join(" "));
+    assert.ok(calledArgs.includes("add -A"));
+    assert.ok(calledArgs.includes("status --porcelain=v1"));
+    assert.ok(calledArgs.includes("commit -m feat: add feature module"));
   });
 });
 
@@ -156,6 +159,32 @@ test("createCommit reports no-change failures clearly", async () => {
       () => createCommit(createExecutor(), { cwd: dir, message: "chore: try empty commit" }),
       (error) => error instanceof CommitMeCommitError && error.code === "no-changes",
     );
+  });
+});
+
+test("createCommit rechecks unsafe file content before staging", async () => {
+  await withTempRepo(async (dir) => {
+    const calls = [];
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+    const { stdout: expectedStatus } = await execFileAsync("git", ["status", "--porcelain=v1", "--branch", "-uall"], {
+      cwd: dir,
+    });
+    const syntheticKey = `sk-${"AbCdEfGhIjKlMnOpQrStUvWxYz012345"}`;
+    await writeFile(join(dir, "feature.ts"), `export const key = "${syntheticKey}";\n`, "utf8");
+
+    await assert.rejects(
+      () =>
+        createCommit(createExecutor(calls), {
+          cwd: dir,
+          message: "feat: add feature module",
+          expectedStatusPorcelain: expectedStatus.trim(),
+        }),
+      (error) => error instanceof CommitMeCommitError && error.code === "unsafe-sensitive-files",
+    );
+
+    assert.equal(calls.some((call) => call.args.join(" ") === "add -A"), false);
+    const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+    assert.match(status, /\?\? feature\.ts/);
   });
 });
 

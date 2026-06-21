@@ -37,7 +37,7 @@ Behavior:
 - `/commitme` drafts a Conventional Commit message, runs `git add -A`, and creates a local commit.
 - `/commitme --confirm` asks before staging and committing.
 - `/commitme help` explains usage, commit standards, and safety behavior.
-- CommitMe aborts before staging if known secret files or high-confidence secret tokens would be committed, or if git status changes after context gathering.
+- CommitMe aborts before staging if known secret files or high-confidence secret tokens would be committed, rechecks unsafe content immediately before staging, or stops if git status changes after context gathering.
 - CommitMe never pushes.
 
 The `commitme` tool is also available to agents. Use `action: "gather"` to collect compact read-only commit context, or `action: "commit"` with an explicit `message` to create a commit. Commit actions use the same sensitive-file and git-status-change guards as `/commitme`.
@@ -56,7 +56,7 @@ CommitMe collects a compact bundle from the current repository:
 
 Untracked directories are expanded to individual files before filtering. The final model prompt is bounded and keeps a commit-message output reminder when truncation is required.
 
-Sensitive paths such as `.env`, `.envrc`, private keys, kubeconfigs, credentials, generated/binary paths, unreadable files, and files with obvious secret-like content are listed by path/status when relevant but not read into model context. Ordinary source files that contain placeholder words like `TOKEN=not-real` are redacted for model context but are not blocked from committing. Commit actions refuse to stage known secret files or high-confidence token patterns; remove them from the commit or commit them manually if intentional.
+Sensitive paths such as `.env`, `.envrc`, private keys, kubeconfigs, credentials, generated/binary paths, unreadable files, symlinks to sensitive repository files, and files with obvious secret-like content are listed by path/status when relevant but not read into model context. Diff collection disables Git external diff and textconv commands. Ordinary source files that contain placeholder words like `TOKEN=not-real` are redacted for model context but are not blocked from committing. Commit actions refuse to stage known secret files or high-confidence token patterns; remove them from the commit or commit them manually if intentional.
 
 ## Development
 

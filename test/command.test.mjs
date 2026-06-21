@@ -108,6 +108,27 @@ test("/commitme help displays help without running git or model drafting", async
   assert.equal(notifications.length, 0);
 });
 
+test("/commitme reports no changes without drafting or mutating", async () => {
+  await withTempRepo(async (dir) => {
+    const calls = [];
+    const messages = [];
+    const notifications = [];
+    const registered = new Map();
+    const pi = createPi(calls, messages, registered);
+    registerCommitMeCommand(pi, {
+      draftCommitMessage: async () => {
+        throw new Error("drafting should not run when there are no changes");
+      },
+    });
+
+    await registered.get("commitme").handler("", createCtx(dir, notifications));
+
+    assert.equal(messages.length, 0);
+    assert.ok(notifications.some((notice) => /no staged or unstaged git changes/.test(notice.message)));
+    assert.equal(calls.some((call) => call.args.join(" ") === "add -A" || call.args[0] === "commit"), false);
+  });
+});
+
 test("/commitme creates a commit without prompting by default", async () => {
   await withTempRepo(async (dir) => {
     await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
@@ -274,13 +295,17 @@ test("/commitme --confirm fails safely without UI", async () => {
     const notifications = [];
     const registered = new Map();
     const pi = createPi(calls, messages, registered);
-    registerCommitMeCommand(pi, { draftCommitMessage: async () => "feat: add feature module" });
+    registerCommitMeCommand(pi, {
+      draftCommitMessage: async () => {
+        throw new Error("drafting should not run when confirmation is unavailable");
+      },
+    });
 
     await assert.rejects(
       () => registered.get("commitme").handler("--confirm", createCtx(dir, notifications, async () => true, false)),
       /--confirm requires a UI-capable Pi mode/,
     );
     assert.equal(messages.length, 0);
-    assert.equal(calls.some((call) => call.args.join(" ") === "add -A" || call.args[0] === "commit"), false);
+    assert.equal(calls.length, 0);
   });
 });

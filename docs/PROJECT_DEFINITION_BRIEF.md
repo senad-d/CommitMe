@@ -4,8 +4,8 @@ Approved during preparation on 2026-06-21.
 
 ## 1. Bootstrap
 
-- Template source: `/Users/senad/Documents/Code/Moj_git/pi-tmp`
-- Target directory: `/Users/senad/Documents/Code/Moj_git/commitme`
+- Template source: local Pi extension template repository (path omitted).
+- Target directory: local `commitme` repository checkout (path omitted).
 - Copy status: copied successfully into a repository that only had `.git`.
 
 ## 2. Project identity
@@ -35,21 +35,21 @@ Approved during preparation on 2026-06-21.
 | --- | --- | --- | --- |
 | Command | `/commitme` | Gather context, ask the LLM for a commit message, and create a local commit | Implemented after preparation |
 | Command flag | `--confirm` | Ask for confirmation before committing | Implemented after preparation; default is no confirmation |
-| Tool | `commitme` | Gather commit context and/or perform final git commit action | Planned |
+| Tool | `commitme` | Gather commit context and/or perform final git commit action | Implemented after preparation |
 | Event | none initially | No background behavior | Avoid long-lived resources |
 | UI | confirmation dialog only | Used only when `--confirm` is set | No custom UI |
 | Resource | none | No skills/prompts/themes initially | Keep extension simple |
 
 ## 5. Architecture
 
-- Planned files:
+- Implemented files:
   - `src/extension.ts` — small entrypoint.
-  - `src/commands/commitme-command.ts` — planned command registration.
-  - `src/tools/commitme-tool.ts` — planned tool schema and execution.
-  - `src/git/context.ts` — planned git status/diff/context gathering.
-  - `src/git/commit.ts` — planned stage-all and commit helper.
-  - `src/prompt/build-commit-prompt.ts` — planned weak-model-friendly prompt builder.
-  - `src/utils/truncation.ts` — planned truncation helpers.
+  - `src/commands/commitme-command.ts` — command registration and flow.
+  - `src/tools/commitme-tool.ts` — tool schema and execution.
+  - `src/git/context.ts` — git status/diff/context gathering.
+  - `src/git/commit.ts` — stage-all and commit helper.
+  - `src/prompt/build-commit-prompt.ts` — weak-model-friendly prompt builder.
+  - `src/utils/truncation.ts` — truncation helpers.
 - Module boundaries:
   - Command orchestrates user intent.
   - Tool exposes LLM-callable context/commit behavior.
@@ -79,19 +79,19 @@ Approved during preparation on 2026-06-21.
 
 ## 8. Documentation and packaging
 
-- README changes: describe planned usage, flags, security behavior, and pending implementation.
-- SECURITY changes: document local git/file access and no telemetry.
-- CHANGELOG changes: initial prepared project entry.
+- README changes: document implemented usage, flags, context boundaries, and security behavior.
+- SECURITY changes: document local git/file access, confirmation behavior, secret filtering, and no telemetry.
+- CHANGELOG changes: track implemented behavior and review hardening.
 - package.json changes:
   - name `@senad-d/commitme`
   - author `Senad Dizdarević <112484166+senad-d@users.noreply.github.com>`
-  - description/keywords updated for CommitMe.
+  - description/keywords/gallery metadata updated for CommitMe.
 - npm/git distribution plan: npm package under `@senad-d`, repository assumed GitHub unless corrected.
 
 ## 9. Validation plan
 
 - Typecheck: `npm run typecheck`
-- Tests: preparation-level tests for package metadata/spec presence/placeholders.
+- Tests: Node test suite covering arguments, command/tool flows, git context, commit behavior, prompt building, package metadata, and truncation.
 - Package dry-run: `npm run check:pack`
 - Isolated Pi smoke test: `pi --no-extensions -e .`
 

@@ -15,21 +15,21 @@ pi install git:https://github.com/senad-d/commitme@<tag>
 - `/commitme --confirm` requests confirmation before staging and committing.
 - Tool `action: "gather"` is read-only and returns compact commit context.
 - Tool `action: "commit"` requires an explicit final message and creates a local commit.
-- Commit actions abort before staging if known secret files or high-confidence secret tokens would be committed, or if git status changes after context gathering.
-- Confirmation is requested only when `--confirm` or tool `confirm: true` is set.
+- Commit actions abort before staging if known secret files or high-confidence secret tokens would be committed, recheck the current working tree for unsafe content immediately before staging, and stop if git status changes after context gathering.
+- Confirmation is requested only when `--confirm` or tool `confirm: true` is set. UI confirmation modes fail before context gathering or model drafting when no UI is available.
 - CommitMe never runs `git push`.
 - CommitMe does not send telemetry.
 - CommitMe does not call non-LLM network APIs.
 - CommitMe uses only the active Pi LLM provider for command message drafting.
 - CommitMe avoids intentionally reading secret files such as `.env`, `.envrc`, private keys, kubeconfigs, and credential stores.
-- Sensitive, generated, binary, unreadable, overly large, or secret-like changed files may be listed by path/status but their contents are omitted from model context.
-- Diff excerpts are filtered through path checks, content checks, and line-level redaction before they are sent to the active Pi LLM provider.
+- Sensitive, generated, binary, unreadable, overly large, symlinked-to-sensitive, or secret-like changed files may be listed by path/status but their contents are omitted from model context.
+- Diff excerpts are collected with Git external diff and textconv disabled, then filtered through path checks, content checks, and line-level redaction before they are sent to the active Pi LLM provider.
 
 ## Reporting vulnerabilities
 
-Before public publishing, add a private security contact or vulnerability disclosure process here.
+Please report suspected security vulnerabilities privately by email: <senad.dizdarevic@proton.me>.
 
-For non-sensitive issues during early development, use the repository issue tracker:
+For non-sensitive issues, use the repository issue tracker:
 
 <https://github.com/senad-d/commitme/issues>
 

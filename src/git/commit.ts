@@ -7,7 +7,7 @@ import type {
   CommitMessageValidationResult,
   CommitResult,
 } from "../types.ts";
-import { isKnownSecretPath, runGit, STATUS_PORCELAIN_ARGS } from "./context.ts";
+import { gatherGitContext, isKnownSecretPath, runGit, STATUS_PORCELAIN_ARGS } from "./context.ts";
 
 const COMMIT_TYPE_PATTERN = CONVENTIONAL_COMMIT_TYPES.join("|");
 const CONVENTIONAL_SUBJECT_RE = new RegExp(
@@ -131,6 +131,9 @@ export async function createCommit(executor: CommitMeExecutor, options: CreateCo
       });
     }
   }
+
+  const currentContext = await gatherGitContext(executor, commonOptions);
+  assertNoUnsafeCommitFiles(currentContext.changedFiles);
 
   await runGit(executor, ["add", "-A"], commonOptions);
 

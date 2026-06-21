@@ -38,6 +38,17 @@ test("package metadata is no longer template metadata", () => {
   assert.ok(packageJson.keywords.includes("conventional-commits"));
 });
 
+test("package gallery metadata points at CommitMe assets", () => {
+  assert.match(packageJson.pi?.image, /^https:\/\/raw\.githubusercontent\.com\/senad-d\/commitme\//);
+});
+
+test("development shim metadata uses CommitMe naming", async () => {
+  const devShimPackage = JSON.parse(await readProjectFile("dev-shims/pi-coding-agent/package.json"));
+
+  assert.match(devShimPackage.name, /commitme/);
+  assert.doesNotMatch(devShimPackage.name, /micme/);
+});
+
 test("required preparation specs exist", async () => {
   await access(new URL("../docs/PROJECT_DEFINITION_BRIEF.md", import.meta.url));
   await access(new URL("../specs/spec-architecture.md", import.meta.url));
@@ -49,6 +60,12 @@ test("task spec tracks implementation progress", async () => {
   const taskSpec = await readProjectFile("specs/spec-tasks.md");
   assert.match(taskSpec, /- \[[ x]\] /i);
   assert.doesNotMatch(taskSpec, /preparation session is complete/i);
+});
+
+test("packaged documentation avoids machine-local preparation paths", async () => {
+  const brief = await readProjectFile("docs/PROJECT_DEFINITION_BRIEF.md");
+
+  assert.doesNotMatch(brief, /\/Users\/|Documents\/Code|Moj_git|pi-tmp/);
 });
 
 test("extension entry point delegates to command and tool registration modules", async () => {

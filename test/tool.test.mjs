@@ -10,9 +10,10 @@ import { createCommitMeTool, registerCommitMeTool } from "../src/tools/commitme-
 
 const execFileAsync = promisify(execFile);
 
-function createExecutor() {
+function createExecutor(calls = []) {
   return {
     async exec(command, args, options = {}) {
+      calls.push({ command, args });
       try {
         const { stdout, stderr } = await execFileAsync(command, args, {
           cwd: options.cwd,
@@ -93,6 +94,28 @@ test("commitme tool defaults to gather when action is omitted", async () => {
   });
 });
 
+test("commitme tool commit action cancels before mutation when confirmation is denied", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+
+    const calls = [];
+    const tool = createCommitMeTool(createExecutor(calls));
+    const result = await tool.execute(
+      "tool-call",
+      { action: "commit", message: "feat: add feature module", confirm: true },
+      undefined,
+      undefined,
+      { cwd: dir, hasUI: true, ui: { confirm: async () => false } },
+    );
+    const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+
+    assert.match(result.content[0].text, /cancelled/);
+    assert.equal(result.details.action, "commit");
+    assert.match(stdout, /\?\? feature\.ts/);
+    assert.equal(calls.some((call) => call.args.join(" ") === "add -A" || call.args[0] === "commit"), false);
+  });
+});
+
 test("commitme tool commit action creates a commit with an explicit message", async () => {
   await withTempRepo(async (dir) => {
     await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
@@ -148,6 +171,29 @@ test("commitme tool commit action requires an explicit message before reading gi
   await assert.rejects(
     () => tool.execute("tool-call", { action: "commit" }, undefined, undefined, { cwd: "/tmp", hasUI: false }),
     /requires a final Lightweight Conventional Commit message/,
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("commitme tool commit action fails fast when confirmation is unavailable", async () => {
+  const calls = [];
+  const tool = createCommitMeTool({
+    async exec(command, args) {
+      calls.push({ command, args });
+      throw new Error("git should not run when confirmation is unavailable");
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      tool.execute(
+        "tool-call",
+        { action: "commit", message: "feat: add feature module", confirm: true },
+        undefined,
+        undefined,
+        { cwd: "/tmp", hasUI: false },
+      ),
+    /confirm=true requires a UI-capable Pi mode/,
   );
   assert.equal(calls.length, 0);
 });

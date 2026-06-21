@@ -202,6 +202,13 @@ function resolveRepositoryPath(root: string, relativePath: string): string | und
   return absolute;
 }
 
+function skippedReasonForRepositoryPath(path: string): SkippedProjectContextEntry["reason"] | undefined {
+  if (isSensitivePath(path)) return "sensitive";
+  if (isGeneratedPath(path)) return "generated";
+  if (looksBinaryByPath(path)) return "binary";
+  return undefined;
+}
+
 async function getReadableRepositoryFile(root: string, path: string): Promise<string | SkippedProjectContextEntry> {
   const repositoryRoot = await realpath(root);
   const absolute = resolveRepositoryPath(repositoryRoot, path);
@@ -212,7 +219,13 @@ async function getReadableRepositoryFile(root: string, path: string): Promise<st
     const target = await realpath(absolute);
     if (!isInsidePath(repositoryRoot, target)) return { path, reason: "outside-repository" };
     const targetInfo = await stat(target);
-    return targetInfo.isFile() ? target : { path, reason: "missing" };
+    if (!targetInfo.isFile()) return { path, reason: "missing" };
+
+    const targetRelativePath = relative(repositoryRoot, target).replace(/\\/g, "/");
+    const targetSkipReason = skippedReasonForRepositoryPath(targetRelativePath);
+    if (targetSkipReason) return { path, reason: targetSkipReason };
+
+    return target;
   }
 
   return info.isFile() ? absolute : { path, reason: "missing" };
@@ -224,9 +237,8 @@ async function readContextEntry(
   kind: ProjectContextEntryKind,
   options: Required<Pick<GatherGitContextOptions, "projectFileMaxBytes" | "projectFileMaxLines">>,
 ): Promise<ProjectContextEntry | SkippedProjectContextEntry> {
-  if (isSensitivePath(path)) return { path, reason: "sensitive" };
-  if (isGeneratedPath(path)) return { path, reason: "generated" };
-  if (looksBinaryByPath(path)) return { path, reason: "binary" };
+  const pathSkipReason = skippedReasonForRepositoryPath(path);
+  if (pathSkipReason) return { path, reason: pathSkipReason };
 
   try {
     const resolved = await getReadableRepositoryFile(root, path);
@@ -437,7 +449,8 @@ function dedupeChangedFiles(files: ChangedFile[]): ChangedFile[] {
 }
 
 function diffArgsForScope(scope: GitChangeScope, extraArgs: string[] = []): string[] {
-  return scope === "staged" ? ["diff", "--cached", ...extraArgs] : ["diff", ...extraArgs];
+  const baseArgs = scope === "staged" ? ["diff", "--cached"] : ["diff"];
+  return [...baseArgs, "--no-ext-diff", "--no-textconv", ...extraArgs];
 }
 
 async function collectDiffSummary(
@@ -493,8 +506,8 @@ export async function gatherGitContext(
   const statusPorcelain = (await runGit(executor, STATUS_PORCELAIN_ARGS, commonOptions)).stdout.trim();
 
   const statusPorcelainZ = (await runGit(executor, STATUS_PORCELAIN_Z_ARGS, commonOptions)).stdout;
-  const stagedNameStatusZ = (await runGit(executor, ["diff", "--cached", "--name-status", "-z"], commonOptions)).stdout;
-  const unstagedNameStatusZ = (await runGit(executor, ["diff", "--name-status", "-z"], commonOptions)).stdout;
+  const stagedNameStatusZ = (await runGit(executor, diffArgsForScope("staged", ["--name-status", "-z"]), commonOptions)).stdout;
+  const unstagedNameStatusZ = (await runGit(executor, diffArgsForScope("unstaged", ["--name-status", "-z"]), commonOptions)).stdout;
   const changedFiles = await applyContentSensitivity(
     repositoryRoot,
     dedupeChangedFiles([
