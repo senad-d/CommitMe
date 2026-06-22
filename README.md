@@ -214,7 +214,7 @@ CommitMe gathers a compact bundle from the current repository and sends it in a 
 - lower-priority project metadata such as `package.json`, README, changelog, and common build config files
 - truncation metadata and visible truncation notices
 
-Generated, binary, unreadable, overly large, symlinked-to-sensitive, and secret-like file contents are omitted from model context. Commit actions still locally scan changed files, including generated and binary-looking paths, for high-confidence secret tokens before staging.
+Contents from generated, binary-looking, unreadable, overly large, symlinked, and secret-like changed files are omitted from model context. Commit actions still locally scan changed files, including generated and binary-looking paths, for high-confidence secret tokens before staging; symlinks to sensitive repository paths are treated as unsafe.
 
 CommitMe validates and normalizes the final subject to this one-line Lightweight Conventional Commit shape:
 
@@ -226,7 +226,7 @@ Allowed types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `build`, `ci`
 
 Summaries should be imperative, clear, specific, and must not end with a period.
 
-For command drafting, CommitMe uses separate system and repository-context prompts where supported by pi, keeps the prompt bounded even for very large context-window local models, and asks for only the final subject line. If a model returns a verbose message with a body, CommitMe automatically extracts the first valid Conventional Commit subject and commits only that line. If a model returns empty text, thinking-only content, a length-stopped response, or an invalid subject, CommitMe retries or repairs once where safe and still refuses to commit without a validated subject.
+For command drafting and gather-tool prompts, CommitMe uses separate system and repository-context prompts where supported by pi, sizes the prompt to the active model when available, keeps the prompt bounded even for very large context-window local models, and asks for only the final subject line. If a model returns a verbose message with a body, CommitMe automatically extracts the first valid Conventional Commit subject and commits only that line. If a model returns empty text, thinking-only content, a length-stopped response, or an invalid subject, CommitMe retries or repairs once where safe and still refuses to commit without a validated subject.
 
 ---
 
@@ -237,8 +237,8 @@ For command drafting, CommitMe uses separate system and repository-context promp
 - CommitMe uses only local `git` commands and the active pi LLM provider.
 - `/commitme --confirm` requires a UI-capable pi mode.
 - Commit actions abort before staging if known secret files or high-confidence secret tokens would be committed.
-- Large, generated, and binary-looking changed files are omitted from model context, but CommitMe still scans them locally to detect high-confidence secret tokens before staging.
-- Renames from sensitive paths stay omitted from model context and are checked for high-confidence secret tokens at their new path.
+- Large, generated, binary-looking, and symlinked changed-file contents are omitted from model context, but CommitMe still scans regular changed files locally to detect high-confidence secret tokens before staging.
+- Renames from sensitive paths and symlinks to sensitive repository paths stay omitted from model context and are checked or marked unsafe before staging.
 - Commit actions recheck unsafe content immediately before staging.
 - Commit actions stop if git status changes after context gathering.
 - Commit actions validate and normalize the drafted message to one subject line before confirmation, staging, or committing.

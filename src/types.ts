@@ -9,6 +9,7 @@ export type SkippedContextReason =
   | "sensitive"
   | "generated"
   | "binary"
+  | "symlink"
   | "missing"
   | "too-large"
   | "unreadable"

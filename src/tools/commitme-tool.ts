@@ -90,7 +90,11 @@ export function createCommitMeTool(pi: ExtensionAPI) {
       }
 
       const context = await gatherGitContext(pi, { cwd: ctx.cwd, signal });
-      const prompt = buildBoundedCommitPrompt(context, { steeringPrompt: params.steeringPrompt });
+      const prompt = buildBoundedCommitPrompt(context, {
+        steeringPrompt: params.steeringPrompt,
+        modelContextWindow: ctx.model?.contextWindow,
+        modelMaxTokens: ctx.model?.maxTokens,
+      });
       const details = createCommitMeDetails("gather", context, {
         ...(params.steeringPrompt ? { steeringPrompt: params.steeringPrompt } : {}),
         truncation: [...collectGitContextTruncation(context), ...prompt.truncation],

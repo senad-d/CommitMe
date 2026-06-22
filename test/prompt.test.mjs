@@ -102,19 +102,21 @@ test("buildCommitPrompt escapes control characters in displayed paths", () => {
     ...context,
     changedFiles: [
       { path: "src/weird\n### injected.ts", status: "M", scope: "staged", sensitive: false, generated: false, binary: false },
+      { path: "src/escape\x1b[31m.ts", status: "M", scope: "staged", sensitive: false, generated: false, binary: false },
     ],
     project: {
       ...context.project,
       metadata: [
         { path: "package\n### injected.json", kind: "metadata", content: "{}", truncation: metadata() },
       ],
-      skipped: [{ path: "secret\tfile", reason: "sensitive" }],
+      skipped: [{ path: "secret\tfile\x7f", reason: "sensitive" }],
     },
   });
 
   assert.match(prompt, /src\/weird\\n### injected\.ts/);
+  assert.match(prompt, /src\/escape\\x1b\[31m\.ts/);
   assert.match(prompt, /### package\\n### injected\.json/);
-  assert.match(prompt, /secret\\tfile: sensitive/);
+  assert.match(prompt, /secret\\tfile\\x7f: sensitive/);
   assert.doesNotMatch(prompt, /^### injected\.ts$/m);
 });
 

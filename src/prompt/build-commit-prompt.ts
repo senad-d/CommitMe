@@ -45,10 +45,11 @@ function cleanBlock(text: string): string {
 }
 
 function formatPath(path: string): string {
-  return path.replace(/[\r\n\t]/g, (character) => {
+  return path.replace(/[\x00-\x1f\x7f]/g, (character) => {
     if (character === "\r") return "\\r";
     if (character === "\n") return "\\n";
-    return "\\t";
+    if (character === "\t") return "\\t";
+    return `\\x${character.charCodeAt(0).toString(16).padStart(2, "0")}`;
   });
 }
 

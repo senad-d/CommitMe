@@ -1,6 +1,6 @@
 import { createReadStream } from "node:fs";
-import { lstat, readFile, realpath, stat } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { lstat, readFile, readlink, realpath, stat } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 import type {
   ChangedFile,
@@ -219,16 +219,15 @@ async function getReadableRepositoryFile(root: string, path: string): Promise<st
 
   const info = await lstat(absolute);
   if (info.isSymbolicLink()) {
-    const target = await realpath(absolute);
+    const targetPath = await readlink(absolute);
+    const target = resolve(dirname(absolute), targetPath);
     if (!isInsidePath(repositoryRoot, target)) return { path, reason: "outside-repository" };
-    const targetInfo = await stat(target);
-    if (!targetInfo.isFile()) return { path, reason: "missing" };
 
     const targetRelativePath = relative(repositoryRoot, target).replace(/\\/g, "/");
     const targetSkipReason = skippedReasonForRepositoryPath(targetRelativePath);
     if (targetSkipReason) return { path, reason: targetSkipReason };
 
-    return target;
+    return { path, reason: "symlink" };
   }
 
   return info.isFile() ? absolute : { path, reason: "missing" };

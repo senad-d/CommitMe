@@ -103,6 +103,23 @@ test("commitme tool includes steering prompt in gathered context", async () => {
   });
 });
 
+test("commitme tool sizes gather prompts for the active model", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+
+    const tool = createCommitMeTool(createExecutor());
+    const result = await tool.execute(
+      "tool-call",
+      { action: "gather" },
+      undefined,
+      undefined,
+      { cwd: dir, model: { contextWindow: 6_000, maxTokens: 1_024 } },
+    );
+
+    assert.equal(result.details.prompt.budgetProfile, "compact");
+  });
+});
+
 test("commitme tool defaults to gather when action is omitted", async () => {
   await withTempRepo(async (dir) => {
     await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");

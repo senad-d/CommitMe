@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Stopped reading symlink target contents into model context while preserving unsafe handling for symlinks that point at sensitive repository paths.
+- Escaped all ASCII control characters in prompt-rendered paths to avoid malformed prompt sections or terminal control output from unusual filenames.
+- Aligned `commitme` gather-tool prompt sizing with the active model context window and output-token budget.
 - Hardened commit safety checks so generated and binary-looking changed files are locally scanned for high-confidence secret tokens before staging while staying out of model context.
 - Propagated Pi abort signals through high-confidence secret scans for changed-file content.
 - Hardened commit safety checks so oversized changed files and renames from sensitive paths are still scanned locally for high-confidence secret tokens before staging.

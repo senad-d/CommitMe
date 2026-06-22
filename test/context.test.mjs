@@ -476,6 +476,32 @@ test("gatherGitContext reports unreadable changed files without failing context 
   });
 });
 
+test("gatherGitContext skips ordinary symlink targets instead of reading their contents", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    await writeFile(join(dir, "target.txt"), "UNRELATED_TARGET_CONTENT_SHOULD_NOT_LEAK\n", "utf8");
+    await git(dir, ["add", "target.txt"]);
+    await git(dir, ["commit", "-m", "chore: add symlink target fixture"]);
+
+    try {
+      await symlink("target.txt", join(dir, "linked-file.txt"));
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && ["EINVAL", "EPERM"].includes(error.code)) {
+        return;
+      }
+      throw error;
+    }
+    await git(dir, ["add", "linked-file.txt"]);
+
+    const context = await gatherGitContext(createExecutor(), { cwd: dir });
+    const combinedContext = JSON.stringify(context.project) + context.staged.excerpt + context.unstaged.excerpt;
+
+    assert.ok(context.changedFiles.some((file) => file.path === "linked-file.txt"));
+    assert.ok(context.project.skipped.some((entry) => entry.path === "linked-file.txt" && entry.reason === "symlink"));
+    assert.doesNotMatch(combinedContext, /UNRELATED_TARGET_CONTENT_SHOULD_NOT_LEAK/);
+  });
+});
+
 test("gatherGitContext does not read symlinked changed files outside the repository", async () => {
   await withTempDir(async (dir) => {
     await initRepo(dir);
@@ -527,7 +553,9 @@ test("gatherGitContext does not read symlinked changed files that target sensiti
     const context = await gatherGitContext(createExecutor(), { cwd: dir });
     const combinedContext = JSON.stringify(context.project) + context.staged.excerpt + context.unstaged.excerpt;
 
-    assert.ok(context.changedFiles.some((file) => file.path === "linked-file.txt"));
+    const linkedFile = context.changedFiles.find((file) => file.path === "linked-file.txt");
+    assert.equal(linkedFile?.sensitive, true);
+    assert.equal(linkedFile?.secretContent, true);
     assert.ok(context.project.skipped.some((entry) => entry.path === "linked-file.txt" && entry.reason === "sensitive"));
     assert.doesNotMatch(combinedContext, /top-secret-db/);
   });
