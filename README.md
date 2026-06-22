@@ -30,7 +30,7 @@ CommitMe is a pi extension for turning local git changes into clear one-line Lig
 
 - **Local-git native:** reads your current repository, stages the gathered changed paths, and commits with `git commit`.
 - **Local-model friendly:** builds a compact, priority-ordered prompt, reserves output budget, normalizes drafts to one subject line, and retries/repairs weak-model drafts when safe.
-- **Safety-aware:** omits secret-like content from model context and refuses known secret files or high-confidence tokens.
+- **Safety-aware:** omits secret-like content from model context and refuses known secret files, unreadable changed files, or high-confidence tokens.
 - **No push, no telemetry:** CommitMe never runs `git push` and does not send usage telemetry.
 - **Pi-native:** use it as a slash command, agent tool, global package, project-local package, git install, or source checkout.
 
@@ -214,7 +214,7 @@ CommitMe gathers a compact bundle from the current repository and sends it in a 
 - lower-priority project metadata such as `package.json`, README, changelog, and common build config files
 - truncation metadata and visible truncation notices
 
-Contents from generated, binary-looking, unreadable, overly large, symlinked, symlink-aliased, and secret-like changed files are omitted from model context. Commit actions still locally scan changed files, including generated and binary-looking paths, for high-confidence secret tokens before staging; symlinks to sensitive repository paths are treated as unsafe.
+Contents from generated, binary-looking, unreadable, overly large, symlinked, symlink-aliased, and secret-like changed files are omitted from model context. Commit actions still locally scan changed files, including generated and binary-looking paths, for high-confidence secret tokens before staging; unreadable changed files and symlinks to sensitive repository paths are treated as unsafe.
 
 CommitMe validates and normalizes the final subject to this one-line Lightweight Conventional Commit shape:
 
@@ -236,8 +236,8 @@ For command drafting and gather-tool prompts, CommitMe uses separate system and 
 - CommitMe does not send telemetry.
 - CommitMe uses only local `git` commands and the active pi LLM provider.
 - `/commitme --confirm` requires a UI-capable pi mode.
-- Commit actions abort before staging if known secret files or high-confidence secret tokens would be committed.
-- Large, generated, binary-looking, symlinked, and symlink-aliased changed-file contents are omitted from model context, but CommitMe still scans regular changed files locally to detect high-confidence secret tokens before staging.
+- Commit actions abort before staging if known secret files, unreadable changed files, or high-confidence secret tokens would be committed.
+- Large, generated, binary-looking, unreadable, symlinked, and symlink-aliased changed-file contents are omitted from model context, but CommitMe still scans regular changed files locally to detect high-confidence secret tokens before staging.
 - Renames from sensitive paths and symlinks to sensitive repository paths stay omitted from model context and are checked or marked unsafe before staging.
 - Commit actions recheck unsafe content immediately before staging.
 - Commit actions stop if git status changes after context gathering.
@@ -257,7 +257,7 @@ See [`SECURITY.md`](SECURITY.md) for details.
 | No changes found | Check `git status`; CommitMe needs staged or unstaged changes. |
 | No active model or API key | Select/configure a pi model, or use the local-model shell function above. |
 | `--confirm requires a UI-capable Pi mode` | Run pi with the TUI, or use `/commitme` without confirmation in non-UI mode. |
-| Commit refused for secret files/tokens | Remove the file/token from the commit, or commit manually if intentional. |
+| Commit refused for secret files/tokens or unreadable files | Remove the file/token, make the changed file readable so CommitMe can scan it, or commit manually if intentional. |
 | Git status changed while CommitMe was running | Rerun CommitMe so it can gather fresh context. |
 | Local model is too slow | Use a smaller model or shorten the diff before running CommitMe. |
 | Empty local-model draft, thinking-only response, or `stopReason=length` | CommitMe retries with a shorter final-answer prompt and larger output budget when possible. If it still fails, reduce the change size, lower/disable model thinking, try `/commitme --confirm`, or use the `commitme` gather tool and ask the agent to draft manually. |

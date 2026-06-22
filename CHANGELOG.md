@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Refused unreadable changed files before staging so CommitMe does not auto-commit content it cannot scan for high-confidence secret tokens.
+- Escaped control characters in unsafe-path refusal messages to avoid malformed terminal output from unusual filenames.
 - Prevented changed paths reached through symlinked directories from reading content outside the repository into model context.
 - Restored the tracked preparation specs expected by validation while keeping them out of packaged npm contents.
 - Limited commit staging to the changed paths gathered during the final safety scan so unrelated files that appear later are not swept into the commit.

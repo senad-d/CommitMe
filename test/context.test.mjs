@@ -469,7 +469,8 @@ test("gatherGitContext reports unreadable changed files without failing context 
     try {
       const context = await gatherGitContext(createExecutor(), { cwd: dir });
 
-      assert.ok(context.changedFiles.some((file) => file.path === "unreadable.txt"));
+      const unreadableFile = context.changedFiles.find((file) => file.path === "unreadable.txt");
+      assert.equal(unreadableFile?.unreadable, true);
       assert.ok(context.project.skipped.some((entry) => entry.path === "unreadable.txt" && entry.reason === "unreadable"));
     } finally {
       await chmod(unreadablePath, 0o600).catch(() => {});

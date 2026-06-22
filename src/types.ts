@@ -137,6 +137,7 @@ export interface ChangedFile {
   binary: boolean;
   relatedPaths?: string[];
   secretContent?: boolean;
+  unreadable?: boolean;
 }
 
 export interface GitDiffSummary {

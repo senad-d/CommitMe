@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -282,6 +282,39 @@ test("/commitme refuses sensitive changed files before drafting or staging", asy
     assert.equal(messages.length, 0);
     assert.match(stdout, /\?\? \.env/);
     assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
+  });
+});
+
+test("/commitme refuses unreadable changed files before drafting or staging", { skip: process.platform === "win32" }, async () => {
+  await withTempRepo(async (dir) => {
+    const unreadablePath = join(dir, "unreadable.txt");
+    await writeFile(unreadablePath, "content that cannot be scanned\n", "utf8");
+    await chmod(unreadablePath, 0o000);
+
+    try {
+      const calls = [];
+      const messages = [];
+      const notifications = [];
+      const registered = new Map();
+      const pi = createPi(calls, messages, registered);
+      registerCommitMeCommand(pi, {
+        draftCommitMessage: async () => {
+          throw new Error("drafting should not run for unreadable files");
+        },
+      });
+
+      await assert.rejects(
+        () => registered.get("commitme").handler("", createCtx(dir, notifications)),
+        /unreadable changed files/,
+      );
+      const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+
+      assert.equal(messages.length, 0);
+      assert.match(stdout, /\?\? unreadable\.txt/);
+      assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
+    } finally {
+      await chmod(unreadablePath, 0o600).catch(() => {});
+    }
   });
 });
 

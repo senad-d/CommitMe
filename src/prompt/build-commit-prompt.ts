@@ -57,7 +57,12 @@ function formatChangedFiles(files: ChangedFile[]): string {
   if (files.length === 0) return "(none)";
   return files
     .map((file) => {
-      const flags = [file.sensitive ? "sensitive content omitted" : "", file.generated ? "generated" : "", file.binary ? "binary" : ""]
+      const flags = [
+        file.sensitive ? "sensitive content omitted" : "",
+        file.generated ? "generated" : "",
+        file.binary ? "binary" : "",
+        file.unreadable ? "unreadable" : "",
+      ]
         .filter(Boolean)
         .join(", ");
       return `- ${file.scope}: ${file.status} ${formatPath(file.path)}${flags ? ` (${flags})` : ""}`;

@@ -76,21 +76,30 @@ export function findUnsafeCommitFiles(files: ChangedFile[]): ChangedFile[] {
   const byPath = new Map<string, ChangedFile>();
   for (const file of files) {
     if (isDeletionStatus(file.status)) continue;
-    if (!file.secretContent && !isKnownSecretPath(file.path)) continue;
+    if (!file.secretContent && !file.unreadable && !isKnownSecretPath(file.path)) continue;
     byPath.set(file.path, file);
   }
   return [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function formatDisplayPath(path: string): string {
+  return path.replace(/[\x00-\x1f\x7f]/g, (character) => {
+    if (character === "\r") return "\\r";
+    if (character === "\n") return "\\n";
+    if (character === "\t") return "\\t";
+    return `\\x${character.charCodeAt(0).toString(16).padStart(2, "0")}`;
+  });
 }
 
 export function assertNoUnsafeCommitFiles(files: ChangedFile[]): void {
   const unsafeFiles = findUnsafeCommitFiles(files);
   if (unsafeFiles.length === 0) return;
 
-  const displayedPaths = unsafeFiles.slice(0, 10).map((file) => file.path).join(", ");
+  const displayedPaths = unsafeFiles.slice(0, 10).map((file) => formatDisplayPath(file.path)).join(", ");
   const omittedCount = unsafeFiles.length - 10;
   const suffix = omittedCount > 0 ? `, and ${omittedCount} more` : "";
   throw new CommitMeCommitError(
-    `CommitMe refused to create a commit because known secret files or high-confidence secret tokens would be staged: ${displayedPaths}${suffix}. Remove them from the commit or commit them manually if intentional.`,
+    `CommitMe refused to create a commit because known secret files or high-confidence secret tokens, or unreadable changed files, would be staged: ${displayedPaths}${suffix}. Remove them from the commit or commit them manually if intentional.`,
     { code: "unsafe-sensitive-files" },
   );
 }

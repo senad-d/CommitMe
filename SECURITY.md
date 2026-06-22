@@ -15,8 +15,8 @@ pi install git:https://github.com/senad-d/commitme@<tag>
 - `/commitme --confirm` requests confirmation before staging and committing.
 - Tool `action: "gather"` is read-only and returns compact commit context.
 - Tool `action: "commit"` requires an explicit final one-line subject and creates a local commit.
-- Commit actions abort before staging if known secret files or high-confidence secret tokens would be committed or if the drafted subject cannot be validated after cleanup/retry/repair; they recheck the current working tree for unsafe content immediately before staging, stop if git status changes after context gathering, and avoid staging unrelated paths that appear after the final changed-file scan.
-- Oversized, generated, binary-looking, renamed, symlinked, and symlink-aliased changed files are omitted from model context when appropriate; CommitMe still scans regular local file content for high-confidence secret tokens before staging, and symlinks to sensitive repository paths are treated as unsafe.
+- Commit actions abort before staging if known secret files, unreadable changed files, or high-confidence secret tokens would be committed or if the drafted subject cannot be validated after cleanup/retry/repair; they recheck the current working tree for unsafe content immediately before staging, stop if git status changes after context gathering, and avoid staging unrelated paths that appear after the final changed-file scan.
+- Oversized, generated, binary-looking, unreadable, renamed, symlinked, and symlink-aliased changed files are omitted from model context when appropriate; CommitMe still scans regular local file content for high-confidence secret tokens before staging, and unreadable changed files or symlinks to sensitive repository paths are treated as unsafe.
 - Confirmation is requested only when `--confirm` or tool `confirm: true` is set. UI confirmation modes fail before context gathering or model drafting when no UI is available.
 - CommitMe never runs `git push`.
 - CommitMe does not send telemetry.
@@ -24,7 +24,7 @@ pi install git:https://github.com/senad-d/commitme@<tag>
 - CommitMe uses only the active Pi LLM provider for command message drafting, including one safe retry or repair prompt when needed.
 - Drafting diagnostics are non-sensitive: they report stop reason, content block type counts, text length, token usage totals when available, and prompt truncation metadata. They do not include raw prompts, raw diffs, file contents, secrets, or raw model output.
 - CommitMe avoids intentionally reading secret files such as `.env`, `.envrc`, private keys, kubeconfigs, and credential stores.
-- Sensitive, generated, binary-looking, unreadable, overly large, symlinked, symlink-aliased, or secret-like changed-file contents may be listed by path/status but are omitted from model context. Generated and binary-looking regular files are still locally checked for high-confidence token patterns before commit actions stage changes.
+- Sensitive, generated, binary-looking, unreadable, overly large, symlinked, symlink-aliased, or secret-like changed-file contents may be listed by path/status but are omitted from model context. Generated and binary-looking regular files are still locally checked for high-confidence token patterns before commit actions stage changes; unreadable changed files are refused because they cannot be scanned safely.
 - Diff excerpts are collected with Git external diff and textconv disabled, then filtered through path checks, content checks, and line-level redaction before they are sent to the active Pi LLM provider.
 
 ## Reporting vulnerabilities

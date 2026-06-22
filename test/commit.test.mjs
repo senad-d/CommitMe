@@ -122,7 +122,7 @@ test("validateCommitMessage keeps breaking-change markers only in the subject", 
   assert.equal(result.message, "feat(api)!: change token contract");
 });
 
-test("findUnsafeCommitFiles blocks known secret paths and high-confidence secret content", () => {
+test("findUnsafeCommitFiles blocks known secret paths, unreadable files, and high-confidence secret content", () => {
   const unsafe = findUnsafeCommitFiles([
     { path: ".env", status: "??", scope: "unstaged", sensitive: true, generated: false, binary: false },
     { path: ".aws/credentials", status: "D", scope: "unstaged", sensitive: true, generated: false, binary: false },
@@ -137,12 +137,39 @@ test("findUnsafeCommitFiles blocks known secret paths and high-confidence secret
       binary: false,
       secretContent: true,
     },
+    {
+      path: "unreadable.txt",
+      status: "M",
+      scope: "unstaged",
+      sensitive: false,
+      generated: false,
+      binary: false,
+      unreadable: true,
+    },
   ]);
 
-  assert.deepEqual(unsafe.map((file) => file.path), [".env", "src/leaked-key.ts"]);
+  assert.deepEqual(unsafe.map((file) => file.path), [".env", "src/leaked-key.ts", "unreadable.txt"]);
   assert.throws(
     () => assertNoUnsafeCommitFiles(unsafe),
     (error) => error instanceof CommitMeCommitError && error.code === "unsafe-sensitive-files",
+  );
+});
+
+test("assertNoUnsafeCommitFiles escapes control characters in reported paths", () => {
+  assert.throws(
+    () =>
+      assertNoUnsafeCommitFiles([
+        {
+          path: "secret\nfile\tname",
+          status: "M",
+          scope: "unstaged",
+          sensitive: true,
+          generated: false,
+          binary: false,
+          secretContent: true,
+        },
+      ]),
+    (error) => error instanceof CommitMeCommitError && /secret\\nfile\\tname/.test(error.message),
   );
 });
 
@@ -321,6 +348,31 @@ test("createCommit rejects renamed high-confidence secret content before staging
     assert.equal(calls.some((call) => call.args[0] === "add"), false);
     const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
     assert.match(status, /R  \.env -> app-config\.txt/);
+  });
+});
+
+test("createCommit rejects unreadable changed files before staging", { skip: process.platform === "win32" }, async () => {
+  await withTempRepo(async (dir) => {
+    const calls = [];
+    const unreadablePath = join(dir, "unreadable.txt");
+    await writeFile(unreadablePath, "content that cannot be scanned\n", "utf8");
+    await chmod(unreadablePath, 0o000);
+
+    try {
+      await assert.rejects(
+        () => createCommit(createExecutor(calls), { cwd: dir, message: "feat: add unreadable fixture" }),
+        (error) =>
+          error instanceof CommitMeCommitError &&
+          error.code === "unsafe-sensitive-files" &&
+          /unreadable changed files/.test(error.message),
+      );
+
+      assert.equal(calls.some((call) => call.args[0] === "add"), false);
+      const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+      assert.match(status, /\?\? unreadable\.txt/);
+    } finally {
+      await chmod(unreadablePath, 0o600).catch(() => {});
+    }
   });
 });
 

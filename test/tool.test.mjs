@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -194,6 +194,36 @@ test("commitme tool commit action refuses sensitive changed files", async () => 
     const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
 
     assert.match(stdout, /\?\? \.env/);
+  });
+});
+
+test("commitme tool commit action refuses unreadable changed files", { skip: process.platform === "win32" }, async () => {
+  await withTempRepo(async (dir) => {
+    const unreadablePath = join(dir, "unreadable.txt");
+    await writeFile(unreadablePath, "content that cannot be scanned\n", "utf8");
+    await chmod(unreadablePath, 0o000);
+
+    try {
+      const calls = [];
+      const tool = createCommitMeTool(createExecutor(calls));
+      await assert.rejects(
+        () =>
+          tool.execute(
+            "tool-call",
+            { action: "commit", message: "feat: add unreadable fixture" },
+            undefined,
+            undefined,
+            { cwd: dir, hasUI: false },
+          ),
+        /unreadable changed files/,
+      );
+      const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+
+      assert.match(stdout, /\?\? unreadable\.txt/);
+      assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
+    } finally {
+      await chmod(unreadablePath, 0o600).catch(() => {});
+    }
   });
 });
 

@@ -279,7 +279,7 @@ async function readContextEntry(
       truncation: truncated.metadata,
     };
   } catch (error) {
-    const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
+    const code = errorCode(error);
     if (code === "ENOENT") return { path, reason: "missing" };
     if (code === "EACCES" || code === "EPERM") return { path, reason: "unreadable" };
     return { path, reason: "too-large" };
@@ -303,6 +303,7 @@ function dedupeChangedFileCandidates(files: ChangedFile[]): ChangedFile[] {
     existing.generated = existing.generated || file.generated;
     existing.binary = existing.binary || file.binary;
     existing.secretContent = existing.secretContent || file.secretContent;
+    existing.unreadable = existing.unreadable || file.unreadable;
     const relatedPaths = [...(existing.relatedPaths ?? []), ...(file.relatedPaths ?? [])];
     if (relatedPaths.length > 0) existing.relatedPaths = [...new Set(relatedPaths)];
   }
@@ -313,6 +314,7 @@ function skippedReasonForChangedFile(file: ChangedFile): SkippedProjectContextEn
   if (file.sensitive) return "sensitive";
   if (file.generated) return "generated";
   if (file.binary) return "binary";
+  if (file.unreadable) return "unreadable";
   return undefined;
 }
 
@@ -372,20 +374,28 @@ async function scanFileForHighConfidenceSecret(path: string, signal?: AbortSigna
   });
 }
 
-async function changedFileHasHighConfidenceSecret(root: string, path: string, signal?: AbortSignal): Promise<boolean> {
+type ChangedFileContentSafety = "safe" | "secret" | "unreadable";
+
+function errorCode(error: unknown): string {
+  return typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
+}
+
+async function inspectChangedFileContentSafety(root: string, path: string, signal?: AbortSignal): Promise<ChangedFileContentSafety> {
   try {
     if (signal?.aborted) throw createAbortError(signal);
     const resolved = await getReadableRepositoryFile(root, path);
-    if (typeof resolved !== "string") return resolved.reason === "sensitive";
-    return await scanFileForHighConfidenceSecret(resolved, signal);
+    if (typeof resolved !== "string") return resolved.reason === "sensitive" ? "secret" : "safe";
+    return (await scanFileForHighConfidenceSecret(resolved, signal)) ? "secret" : "safe";
   } catch (error) {
     if (signal?.aborted) throw error;
-    return false;
+    const code = errorCode(error);
+    if (code === "EACCES" || code === "EPERM") return "unreadable";
+    return "safe";
   }
 }
 
 async function applyContentSensitivity(root: string, changedFiles: ChangedFile[], signal?: AbortSignal): Promise<ChangedFile[]> {
-  const scannedPaths = new Map<string, boolean>();
+  const scannedPaths = new Map<string, ChangedFileContentSafety>();
   const output: ChangedFile[] = [];
 
   for (const file of changedFiles) {
@@ -396,13 +406,19 @@ async function applyContentSensitivity(root: string, changedFiles: ChangedFile[]
       continue;
     }
 
-    let contentSensitive = scannedPaths.get(file.path);
-    if (contentSensitive === undefined) {
-      contentSensitive = await changedFileHasHighConfidenceSecret(root, file.path, signal);
-      scannedPaths.set(file.path, contentSensitive);
+    let contentSafety = scannedPaths.get(file.path);
+    if (contentSafety === undefined) {
+      contentSafety = await inspectChangedFileContentSafety(root, file.path, signal);
+      scannedPaths.set(file.path, contentSafety);
     }
 
-    output.push(contentSensitive ? { ...file, sensitive: true, secretContent: true } : file);
+    if (contentSafety === "secret") {
+      output.push({ ...file, sensitive: true, secretContent: true });
+    } else if (contentSafety === "unreadable") {
+      output.push({ ...file, unreadable: true });
+    } else {
+      output.push(file);
+    }
   }
 
   return output;
