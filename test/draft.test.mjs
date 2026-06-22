@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  draftCommitMessageWithActiveModel,
   formatDraftResponseDiagnostics,
   inspectAssistantResponse,
   selectDraftMaxTokens,
@@ -68,4 +69,30 @@ test("draft token budgets respect model maximums and grow on retry", () => {
   assert.equal(selectDraftMaxTokens({ maxTokens: 4096 }), 1024);
   assert.equal(selectRetryDraftMaxTokens({ maxTokens: 4096 }, 1024), 1536);
   assert.equal(selectRetryDraftMaxTokens({ maxTokens: 1200 }, 1024), 1200);
+});
+
+test("draftCommitMessageWithActiveModel fails clearly without an active model", async () => {
+  await assert.rejects(() => draftCommitMessageWithActiveModel("prompt", { model: undefined }), /No active Pi model/);
+});
+
+test("draftCommitMessageWithActiveModel fails clearly without an API key", async () => {
+  await assert.rejects(
+    () =>
+      draftCommitMessageWithActiveModel("prompt", {
+        model: { provider: "fixture", id: "model" },
+        modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "" }) },
+      }),
+    /No API key is available for fixture\/model/,
+  );
+});
+
+test("draftCommitMessageWithActiveModel surfaces model registry errors", async () => {
+  await assert.rejects(
+    () =>
+      draftCommitMessageWithActiveModel("prompt", {
+        model: { provider: "fixture", id: "model" },
+        modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: false, error: "auth failed" }) },
+      }),
+    /auth failed/,
+  );
 });

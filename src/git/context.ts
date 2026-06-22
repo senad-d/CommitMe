@@ -304,57 +304,89 @@ function skippedReasonForChangedFile(file: ChangedFile): SkippedProjectContextEn
   return undefined;
 }
 
-async function scanFileForHighConfidenceSecret(path: string): Promise<boolean> {
+function createAbortError(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) return signal.reason;
+  const error = new Error("CommitMe secret scan aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
+async function scanFileForHighConfidenceSecret(path: string, signal?: AbortSignal): Promise<boolean> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError(signal));
+      return;
+    }
+
     const stream = createReadStream(path, { encoding: "utf8", highWaterMark: SECRET_SCAN_CHUNK_BYTES });
     let settled = false;
     let tail = "";
 
-    function settle(value: boolean) {
+    function cleanup() {
+      signal?.removeEventListener("abort", onAbort);
+    }
+
+    function resolveOnce(value: boolean) {
       if (settled) return;
       settled = true;
+      cleanup();
       resolve(value);
       stream.destroy();
     }
 
+    function rejectOnce(error: unknown) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+      stream.destroy();
+    }
+
+    function onAbort() {
+      if (signal) rejectOnce(createAbortError(signal));
+    }
+
+    signal?.addEventListener("abort", onAbort, { once: true });
     stream.on("data", (chunk) => {
       const text = `${tail}${chunk}`;
       if (looksHighConfidenceSecretContent(text)) {
-        settle(true);
+        resolveOnce(true);
         return;
       }
       tail = text.slice(-SECRET_SCAN_OVERLAP_CHARS);
     });
-    stream.once("end", () => settle(false));
-    stream.once("error", (error) => {
-      if (!settled) reject(error);
-    });
+    stream.once("end", () => resolveOnce(false));
+    stream.once("error", (error) => rejectOnce(error));
   });
 }
 
-async function changedFileHasHighConfidenceSecret(root: string, path: string): Promise<boolean> {
+async function changedFileHasHighConfidenceSecret(root: string, path: string, signal?: AbortSignal): Promise<boolean> {
   try {
+    if (signal?.aborted) throw createAbortError(signal);
     const resolved = await getReadableRepositoryFile(root, path);
     if (typeof resolved !== "string") return resolved.reason === "sensitive";
-    return await scanFileForHighConfidenceSecret(resolved);
-  } catch {
+    return await scanFileForHighConfidenceSecret(resolved, signal);
+  } catch (error) {
+    if (signal?.aborted) throw error;
     return false;
   }
 }
 
-async function applyContentSensitivity(root: string, changedFiles: ChangedFile[]): Promise<ChangedFile[]> {
+async function applyContentSensitivity(root: string, changedFiles: ChangedFile[], signal?: AbortSignal): Promise<ChangedFile[]> {
   const scannedPaths = new Map<string, boolean>();
   const output: ChangedFile[] = [];
 
   for (const file of changedFiles) {
-    if (isKnownSecretPath(file.path) || file.generated || file.binary || file.status.startsWith("D")) {
+    if (signal?.aborted) throw createAbortError(signal);
+
+    if (isKnownSecretPath(file.path) || file.status.startsWith("D")) {
       output.push(file);
       continue;
     }
 
     let contentSensitive = scannedPaths.get(file.path);
     if (contentSensitive === undefined) {
-      contentSensitive = await changedFileHasHighConfidenceSecret(root, file.path);
+      contentSensitive = await changedFileHasHighConfidenceSecret(root, file.path, signal);
       scannedPaths.set(file.path, contentSensitive);
     }
 
@@ -552,6 +584,7 @@ export async function gatherGitContext(
       ...parseNameStatusZ(unstagedNameStatusZ, "unstaged"),
       ...parseStatusPorcelainZ(statusPorcelainZ),
     ]),
+    options.signal,
   );
 
   const diffOptions = {

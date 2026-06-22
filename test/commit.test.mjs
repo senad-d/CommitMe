@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -228,6 +228,24 @@ test("createCommit rejects oversized high-confidence secret content before stagi
     assert.equal(calls.some((call) => call.args.join(" ") === "add -A"), false);
     const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
     assert.match(status, /\?\? large-leaked-key\.ts/);
+  });
+});
+
+test("createCommit rejects generated high-confidence secret content before staging", async () => {
+  await withTempRepo(async (dir) => {
+    const calls = [];
+    const syntheticKey = `sk-${"AbCdEfGhIjKlMnOpQrStUvWxYz012345"}`;
+    await mkdir(join(dir, "dist"));
+    await writeFile(join(dir, "dist", "bundle.js"), `export const key = "${syntheticKey}";\n`, "utf8");
+
+    await assert.rejects(
+      () => createCommit(createExecutor(calls), { cwd: dir, message: "feat: add feature module" }),
+      (error) => error instanceof CommitMeCommitError && error.code === "unsafe-sensitive-files",
+    );
+
+    assert.equal(calls.some((call) => call.args.join(" ") === "add -A"), false);
+    const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1", "-uall"], { cwd: dir });
+    assert.match(status, /\?\? dist\/bundle\.js/);
   });
 });
 

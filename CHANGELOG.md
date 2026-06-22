@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Hardened commit safety checks so generated and binary-looking changed files are locally scanned for high-confidence secret tokens before staging while staying out of model context.
+- Propagated Pi abort signals through high-confidence secret scans for changed-file content.
 - Hardened commit safety checks so oversized changed files and renames from sensitive paths are still scanned locally for high-confidence secret tokens before staging.
 - Added early validation for `commitme` tool `action: "commit"` messages so invalid subjects fail before reading git context or prompting for confirmation.
 - Added optional steering prompts for `/commitme [steering prompt]` and `/commitme --confirm [steering prompt]`.

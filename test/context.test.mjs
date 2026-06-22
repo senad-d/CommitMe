@@ -249,6 +249,58 @@ test("gatherGitContext skips generated changed files for snippets", async () => 
   });
 });
 
+test("gatherGitContext scans generated changed files for high-confidence secrets", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    await mkdir(join(dir, "dist"));
+    const syntheticKey = `sk-${"AbCdEfGhIjKlMnOpQrStUvWxYz012345"}`;
+    await writeFile(join(dir, "dist", "bundle.js"), `export const key = "${syntheticKey}";\n`, "utf8");
+    await git(dir, ["add", "dist/bundle.js"]);
+
+    const context = await gatherGitContext(createExecutor(), { cwd: dir });
+    const file = context.changedFiles.find((entry) => entry.path === "dist/bundle.js");
+    const combinedContext = JSON.stringify(context.project) + context.staged.excerpt + context.unstaged.excerpt;
+
+    assert.equal(file?.generated, true);
+    assert.equal(file?.sensitive, true);
+    assert.equal(file?.secretContent, true);
+    assert.ok(context.project.skipped.some((entry) => entry.path === "dist/bundle.js" && entry.reason === "sensitive"));
+    assert.doesNotMatch(combinedContext, new RegExp(syntheticKey));
+  });
+});
+
+test("gatherGitContext scans binary-looking changed files for high-confidence secrets", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    const syntheticKey = `sk-${"AbCdEfGhIjKlMnOpQrStUvWxYz012345"}`;
+    await writeFile(join(dir, "snapshot.png"), `not really png ${syntheticKey}\n`, "utf8");
+    await git(dir, ["add", "snapshot.png"]);
+
+    const context = await gatherGitContext(createExecutor(), { cwd: dir });
+    const file = context.changedFiles.find((entry) => entry.path === "snapshot.png");
+    const combinedContext = JSON.stringify(context.project) + context.staged.excerpt + context.unstaged.excerpt;
+
+    assert.equal(file?.binary, true);
+    assert.equal(file?.sensitive, true);
+    assert.equal(file?.secretContent, true);
+    assert.ok(context.project.skipped.some((entry) => entry.path === "snapshot.png" && entry.reason === "sensitive"));
+    assert.doesNotMatch(combinedContext, new RegExp(syntheticKey));
+  });
+});
+
+test("gatherGitContext propagates abort signals before content sensitivity scans", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+    await git(dir, ["add", "feature.ts"]);
+
+    const controller = new AbortController();
+    controller.abort(new Error("stop scanning"));
+
+    await assert.rejects(() => gatherGitContext(createExecutor(), { cwd: dir, signal: controller.signal }), /stop scanning/);
+  });
+});
+
 test("gatherGitContext filters sensitive changed file contents", async () => {
   await withTempDir(async (dir) => {
     await initRepo(dir);

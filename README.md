@@ -214,7 +214,7 @@ CommitMe gathers a compact bundle from the current repository and sends it in a 
 - lower-priority project metadata such as `package.json`, README, changelog, and common build config files
 - truncation metadata and visible truncation notices
 
-Generated, binary, unreadable, overly large, symlinked-to-sensitive, and secret-like file contents are omitted from model context.
+Generated, binary, unreadable, overly large, symlinked-to-sensitive, and secret-like file contents are omitted from model context. Commit actions still locally scan changed files, including generated and binary-looking paths, for high-confidence secret tokens before staging.
 
 CommitMe validates and normalizes the final subject to this one-line Lightweight Conventional Commit shape:
 
@@ -237,7 +237,7 @@ For command drafting, CommitMe uses separate system and repository-context promp
 - CommitMe uses only local `git` commands and the active pi LLM provider.
 - `/commitme --confirm` requires a UI-capable pi mode.
 - Commit actions abort before staging if known secret files or high-confidence secret tokens would be committed.
-- Large changed files are omitted from model context, but CommitMe still streams them locally to detect high-confidence secret tokens before staging.
+- Large, generated, and binary-looking changed files are omitted from model context, but CommitMe still scans them locally to detect high-confidence secret tokens before staging.
 - Renames from sensitive paths stay omitted from model context and are checked for high-confidence secret tokens at their new path.
 - Commit actions recheck unsafe content immediately before staging.
 - Commit actions stop if git status changes after context gathering.
