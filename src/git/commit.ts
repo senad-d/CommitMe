@@ -130,7 +130,7 @@ function findFirstConventionalSubjectLine(text: string): string | undefined {
 }
 
 export function extractCommitMessage(raw: string): string {
-  let text = stripMarkdownFence(raw).replace(/\r\n/g, "\n").trim();
+  let text = stripMarkdownFence(raw.replace(/\r\n/g, "\n")).trim();
   text = stripMatchingQuotes(stripSimplePrefix(text)).trim();
 
   const lines = text.split("\n");

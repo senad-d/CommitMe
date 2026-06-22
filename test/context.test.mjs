@@ -534,6 +534,39 @@ test("gatherGitContext does not read symlinked changed files outside the reposit
   });
 });
 
+test("gatherGitContext does not read changed paths through symlinked directories outside the repository", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    const outsideDir = await mkdtemp(join(tmpdir(), "commitme-outside-"));
+    try {
+      await mkdir(join(dir, "linked-dir"));
+      await writeFile(join(dir, "linked-dir", "secret.txt"), "safe tracked fixture\n", "utf8");
+      await git(dir, ["add", "linked-dir/secret.txt"]);
+      await git(dir, ["commit", "-m", "chore: add tracked fixture"]);
+      await rm(join(dir, "linked-dir"), { recursive: true, force: true });
+      await writeFile(join(outsideDir, "secret.txt"), "TOP_SECRET_VALUE\n", "utf8");
+
+      try {
+        await symlink(outsideDir, join(dir, "linked-dir"));
+      } catch (error) {
+        if (error && typeof error === "object" && "code" in error && ["EINVAL", "EPERM"].includes(error.code)) {
+          return;
+        }
+        throw error;
+      }
+
+      const context = await gatherGitContext(createExecutor(), { cwd: dir });
+      const combinedContext = JSON.stringify(context.project) + context.staged.excerpt + context.unstaged.excerpt;
+
+      assert.ok(context.changedFiles.some((file) => file.path === "linked-dir"));
+      assert.ok(context.project.skipped.some((entry) => entry.path === "linked-dir" && entry.reason === "outside-repository"));
+      assert.doesNotMatch(combinedContext, /TOP_SECRET_VALUE/);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+});
+
 test("gatherGitContext does not read symlinked changed files that target sensitive repository files", async () => {
   await withTempDir(async (dir) => {
     await initRepo(dir);

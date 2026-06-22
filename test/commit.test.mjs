@@ -59,6 +59,7 @@ test("extractCommitMessage strips simple model wrappers", () => {
   assert.equal(extractCommitMessage("Commit message: feat: add commit helper"), "feat: add commit helper");
   assert.equal(extractCommitMessage("Final answer: fix: handle errors"), "fix: handle errors");
   assert.equal(extractCommitMessage("```\nfix: handle errors\n```"), "fix: handle errors");
+  assert.equal(extractCommitMessage("```\r\nfix: handle CRLF fences\r\n```"), "fix: handle CRLF fences");
   assert.equal(extractCommitMessage('"docs: update README"'), "docs: update README");
 });
 

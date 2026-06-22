@@ -230,7 +230,18 @@ async function getReadableRepositoryFile(root: string, path: string): Promise<st
     return { path, reason: "symlink" };
   }
 
-  return info.isFile() ? absolute : { path, reason: "missing" };
+  if (!info.isFile()) return { path, reason: "missing" };
+
+  const canonicalFilePath = await realpath(absolute);
+  if (!isInsidePath(repositoryRoot, canonicalFilePath)) return { path, reason: "outside-repository" };
+
+  const canonicalRelativePath = relative(repositoryRoot, canonicalFilePath).replace(/\\/g, "/");
+  if (canonicalRelativePath !== path.replace(/\\/g, "/")) {
+    const canonicalSkipReason = skippedReasonForRepositoryPath(canonicalRelativePath);
+    return { path, reason: canonicalSkipReason ?? "symlink" };
+  }
+
+  return canonicalFilePath;
 }
 
 async function readContextEntry(

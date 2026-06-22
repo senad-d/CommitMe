@@ -214,7 +214,7 @@ CommitMe gathers a compact bundle from the current repository and sends it in a 
 - lower-priority project metadata such as `package.json`, README, changelog, and common build config files
 - truncation metadata and visible truncation notices
 
-Contents from generated, binary-looking, unreadable, overly large, symlinked, and secret-like changed files are omitted from model context. Commit actions still locally scan changed files, including generated and binary-looking paths, for high-confidence secret tokens before staging; symlinks to sensitive repository paths are treated as unsafe.
+Contents from generated, binary-looking, unreadable, overly large, symlinked, symlink-aliased, and secret-like changed files are omitted from model context. Commit actions still locally scan changed files, including generated and binary-looking paths, for high-confidence secret tokens before staging; symlinks to sensitive repository paths are treated as unsafe.
 
 CommitMe validates and normalizes the final subject to this one-line Lightweight Conventional Commit shape:
 
@@ -237,7 +237,7 @@ For command drafting and gather-tool prompts, CommitMe uses separate system and 
 - CommitMe uses only local `git` commands and the active pi LLM provider.
 - `/commitme --confirm` requires a UI-capable pi mode.
 - Commit actions abort before staging if known secret files or high-confidence secret tokens would be committed.
-- Large, generated, binary-looking, and symlinked changed-file contents are omitted from model context, but CommitMe still scans regular changed files locally to detect high-confidence secret tokens before staging.
+- Large, generated, binary-looking, symlinked, and symlink-aliased changed-file contents are omitted from model context, but CommitMe still scans regular changed files locally to detect high-confidence secret tokens before staging.
 - Renames from sensitive paths and symlinks to sensitive repository paths stay omitted from model context and are checked or marked unsafe before staging.
 - Commit actions recheck unsafe content immediately before staging.
 - Commit actions stop if git status changes after context gathering.
