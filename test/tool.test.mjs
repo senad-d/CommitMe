@@ -73,8 +73,8 @@ test("commitme tool gathers compact context with structured details", async () =
     const result = await tool.execute("tool-call", { action: "gather" }, undefined, undefined, { cwd: dir });
     const text = result.content[0].text;
 
-    assert.match(text, /Return only one Lightweight Conventional Commit message/);
-    assert.match(text, /feature\.ts/);
+    assert.match(text, /CommitMe gathered local git context/);
+    assert.match(text, /Return only one Lightweight Conventional Commit subject line/);    assert.match(text, /feature\.ts/);
     assert.equal(result.details.action, "gather");
     assert.match(result.details.statusPorcelain, /feature\.ts/);
     assert.equal(result.details.hasChanges, true);
@@ -184,13 +184,13 @@ test("commitme tool commit action requires an explicit message before reading gi
   const tool = createCommitMeTool({
     async exec(command, args) {
       calls.push({ command, args });
-      throw new Error("git should not run without a commit message");
+      throw new Error("git should not run without a commit subject");
     },
   });
 
   await assert.rejects(
     () => tool.execute("tool-call", { action: "commit" }, undefined, undefined, { cwd: "/tmp", hasUI: false }),
-    /requires a final Lightweight Conventional Commit message/,
+    /requires a final one-line Lightweight Conventional Commit subject/,
   );
   assert.equal(calls.length, 0);
 });

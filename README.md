@@ -15,7 +15,7 @@
 
 ---
 
-CommitMe is a pi extension for turning local git changes into clear Lightweight Conventional Commit messages. It gathers staged and unstaged git context, trims noisy diffs, redacts sensitive content, asks the active pi model for one message, then creates a local git commit.
+CommitMe is a pi extension for turning local git changes into clear one-line Lightweight Conventional Commit subjects. It gathers staged and unstaged git context, trims noisy diffs, redacts sensitive content, asks the active pi model for one subject line, then creates a local git commit.
 
 <table align="center">
   <tr>
@@ -29,7 +29,7 @@ CommitMe is a pi extension for turning local git changes into clear Lightweight 
 </table>
 
 - **Local-git native:** reads your current repository and commits with `git add -A` + `git commit`.
-- **Local-model friendly:** builds a compact, bounded prompt so smaller/local models can work well.
+- **Local-model friendly:** builds a compact, priority-ordered prompt, reserves output budget, normalizes drafts to one subject line, and retries/repairs weak-model drafts when safe.
 - **Safety-aware:** omits secret-like content from model context and refuses known secret files or high-confidence tokens.
 - **No push, no telemetry:** CommitMe never runs `git push` and does not send usage telemetry.
 - **Pi-native:** use it as a slash command, agent tool, global package, project-local package, git install, or source checkout.
@@ -74,7 +74,7 @@ When you are comfortable with the workflow, run the fast path:
 /commitme focus the message on the command steering support
 ```
 
-CommitMe will gather the current repository changes, ask your active pi model for a Lightweight Conventional Commit message, stage all changes with `git add -A`, and create a local commit. Optional steering text after the command guides the model when it matches the actual git changes. CommitMe never pushes.
+CommitMe will gather the current repository changes, ask your active pi model for a one-line Lightweight Conventional Commit subject, stage all changes with `git add -A`, and create a local commit. Optional steering text after the command guides the model when it matches the actual git changes. CommitMe never pushes.
 
 ---
 
@@ -167,6 +167,8 @@ Notes:
 - Install CommitMe globally first with `pi install npm:@senad-d/commitme`, or add `-e /absolute/path/to/commitme` to the `pi` command while developing from source.
 - This helper uses `pi --no-session -p`, so it is intended for the fast non-interactive path. Use the TUI with `/commitme --confirm` when you want an approval prompt.
 - Change `essentialai/rnj-1` and `local-llm/essentialai/rnj-1` to match your local model provider and model id.
+- Increasing context length alone may not fix empty local-model drafts. Some reasoning models can spend their whole output budget on thinking/reasoning and return no final text.
+- If your local provider exposes a thinking/reasoning setting, lower or disable it for CommitMe if drafts are empty or stop by length.
 - Remove the `trap` line if you do not want the function to shut down the LM Studio daemon after each run.
 - Rename the function to `commitme()` if you do not want to shadow a `commit` alias or function.
 
@@ -191,8 +193,8 @@ CommitMe also registers a `commitme` tool for agents.
 
 | Tool action | Behavior |
 | --- | --- |
-| `action: "gather"` | Read-only. Returns compact git/project context and a commit-message prompt. Accepts optional `steeringPrompt` guidance. |
-| `action: "commit"` | Requires an explicit final `message`; stages all changes and creates a local commit. |
+| `action: "gather"` | Read-only. Returns compact git/project context and a subject-line prompt. Accepts optional `steeringPrompt` guidance. |
+| `action: "commit"` | Requires an explicit final one-line `message`; stages all changes and creates a local commit. |
 
 Use the tool when you want pi to draft a message without immediately committing, or when another workflow needs bounded git context.
 
@@ -200,31 +202,31 @@ Use the tool when you want pi to draft a message without immediately committing,
 
 ## Context and Commit Standard
 
-CommitMe gathers a compact bundle from the current repository:
+CommitMe gathers a compact bundle from the current repository and sends it in a local-model-friendly order:
 
+- output contract and drafting process
 - current branch and porcelain status
-- staged and unstaged diff stats
 - staged and unstaged changed paths
-- bounded, redacted diff excerpts
-- small project metadata such as `package.json`, README, changelog, and common build config files
+- staged and unstaged diff stats
 - safe snippets from changed text files
+- bounded, redacted diff excerpts
+- omitted-context notices and warnings
+- lower-priority project metadata such as `package.json`, README, changelog, and common build config files
 - truncation metadata and visible truncation notices
 
 Generated, binary, unreadable, overly large, symlinked-to-sensitive, and secret-like file contents are omitted from model context.
 
-CommitMe validates the final message against this Lightweight Conventional Commit shape:
+CommitMe validates and normalizes the final subject to this one-line Lightweight Conventional Commit shape:
 
 ```text
 <type>(optional-scope): <summary>
-
-[optional body]
-
-[optional footer]
 ```
 
 Allowed types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `build`, `ci`, `perf`, `style`, and `revert`.
 
 Summaries should be imperative, clear, specific, and must not end with a period.
+
+For command drafting, CommitMe uses separate system and repository-context prompts where supported by pi, keeps the prompt bounded even for very large context-window local models, and asks for only the final subject line. If a model returns a verbose message with a body, CommitMe automatically extracts the first valid Conventional Commit subject and commits only that line. If a model returns empty text, thinking-only content, a length-stopped response, or an invalid subject, CommitMe retries or repairs once where safe and still refuses to commit without a validated subject.
 
 ---
 
@@ -237,6 +239,7 @@ Summaries should be imperative, clear, specific, and must not end with a period.
 - Commit actions abort before staging if known secret files or high-confidence secret tokens would be committed.
 - Commit actions recheck unsafe content immediately before staging.
 - Commit actions stop if git status changes after context gathering.
+- Commit actions validate and normalize the drafted message to one subject line before confirmation, staging, or committing.
 - Diff collection disables Git external diff and textconv commands.
 - Ordinary placeholder examples such as `TOKEN=not-real` may be redacted from model context but are not treated like real secrets.
 
@@ -255,6 +258,9 @@ See [`SECURITY.md`](SECURITY.md) for details.
 | Commit refused for secret files/tokens | Remove the file/token from the commit, or commit manually if intentional. |
 | Git status changed while CommitMe was running | Rerun CommitMe so it can gather fresh context. |
 | Local model is too slow | Use a smaller model or shorten the diff before running CommitMe. |
+| Empty local-model draft, thinking-only response, or `stopReason=length` | CommitMe retries with a shorter final-answer prompt and larger output budget when possible. If it still fails, reduce the change size, lower/disable model thinking, try `/commitme --confirm`, or use the `commitme` gather tool and ask the agent to draft manually. |
+| Verbose local-model draft with a body | CommitMe automatically extracts the first valid Conventional Commit subject and commits only that one line. |
+| Invalid Conventional Commit draft | CommitMe attempts deterministic cleanup/repair but refuses to stage or commit unless the final subject validates. Add clearer steering text or gather context manually with the `commitme` tool. |
 
 ---
 

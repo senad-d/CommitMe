@@ -4,6 +4,8 @@
 
 - Added optional steering prompts for `/commitme [steering prompt]` and `/commitme --confirm [steering prompt]`.
 - Added `steeringPrompt` support to the `commitme` gather tool so agent workflows can guide commit-message drafting.
+- Improved local-model drafting reliability with system/user prompt parts, priority-budgeted context, weak-model drafting instructions, response diagnostics, retry/repair handling for empty/thinking-only/length-stopped/invalid drafts, and validation before staging.
+- Standardized CommitMe output on one-line Conventional Commit subjects by prompting for subject-only drafts and automatically extracting the first valid subject from verbose model output.
 
 ## 0.1.0 - 2026-06-21
 

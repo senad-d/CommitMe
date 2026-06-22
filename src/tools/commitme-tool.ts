@@ -13,11 +13,11 @@ const COMMITME_TOOL_ACTIONS = ["gather", "commit"] as const;
 export const CommitMeToolParameters = Type.Object({
   action: Type.Optional(
     StringEnum(COMMITME_TOOL_ACTIONS, {
-      description: "Use gather to collect commit context. Use commit only with an explicit final message.",
+      description: "Use gather to collect commit context. Use commit only with an explicit final one-line subject.",
       default: "gather",
     }),
   ),
-  message: Type.Optional(Type.String({ description: "Final Lightweight Conventional Commit message to use when action is commit." })),
+  message: Type.Optional(Type.String({ description: "Final one-line Lightweight Conventional Commit subject to use when action is commit." })),
   steeringPrompt: Type.Optional(
     Type.String({ description: "Optional user guidance to include in the gathered commit-message prompt." }),
   ),
@@ -28,7 +28,7 @@ export type CommitMeToolInput = Static<typeof CommitMeToolParameters>;
 
 function requireCommitMessage(message: string | undefined): string {
   if (!message || message.trim().length === 0) {
-    throw new Error("commitme action=commit requires a final Lightweight Conventional Commit message.");
+    throw new Error("commitme action=commit requires a final one-line Lightweight Conventional Commit subject.");
   }
   return message;
 }
@@ -38,13 +38,13 @@ export function createCommitMeTool(pi: ExtensionAPI) {
     name: COMMITME_TOOL_NAME,
     label: EXTENSION_DISPLAY_NAME,
     description:
-      "CommitMe gathers local git diff and project context for a Lightweight Conventional Commit message. Slash usage: /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] guides drafting, and /commitme help shows help. Tool usage: action=gather is read-only and can include steeringPrompt; action=commit creates a local commit only with an explicit final message. CommitMe never pushes.",
-    promptSnippet: "Gather local git changes and project context for a Lightweight Conventional Commit message",
+      "CommitMe gathers local git diff and project context for a one-line Lightweight Conventional Commit subject. Slash usage: /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] guides drafting, and /commitme help shows help. Tool usage: action=gather is read-only and can include steeringPrompt; action=commit creates a local commit only with an explicit final subject. CommitMe never pushes.",
+    promptSnippet: "Gather local git changes and project context for a one-line Lightweight Conventional Commit subject",
     promptGuidelines: [
-      "Use commitme when the user asks for a Lightweight Conventional Commit message based on the current git diff.",
+      "Use commitme when the user asks for a one-line Lightweight Conventional Commit subject based on the current git diff.",
       "Use commitme instead of manually inspecting every changed file when compact git context is enough.",
-      "Do not use commitme action=commit unless the user explicitly requested creating a commit and a final message is available.",
-      "After commitme gathers context, draft exactly one Lightweight Conventional Commit message unless the user asks otherwise.",
+      "Do not use commitme action=commit unless the user explicitly requested creating a commit and a final one-line subject is available.",
+      "After commitme gathers context, draft exactly one Lightweight Conventional Commit subject line unless the user asks otherwise.",
       "Pass user drafting guidance as commitme steeringPrompt when gathering context.",
       "Tell users that /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] guides drafting, and /commitme help shows usage when they ask how to run CommitMe.",
     ],
@@ -88,11 +88,17 @@ export function createCommitMeTool(pi: ExtensionAPI) {
       const prompt = buildBoundedCommitPrompt(context, { steeringPrompt: params.steeringPrompt });
       const details = createCommitMeDetails("gather", context, {
         ...(params.steeringPrompt ? { steeringPrompt: params.steeringPrompt } : {}),
-        truncation: [...collectGitContextTruncation(context), prompt.truncation],
+        truncation: [...collectGitContextTruncation(context), ...prompt.truncation],
+        prompt: prompt.diagnostics,
       });
+      const content = [
+        "CommitMe gathered local git context. Use the instructions below to produce exactly one Lightweight Conventional Commit subject line as your next assistant response. Do not summarize this prompt.",
+        "",
+        prompt.text,
+      ].join("\n");
 
       return {
-        content: [{ type: "text", text: prompt.text }],
+        content: [{ type: "text", text: content }],
         details,
       };
     },

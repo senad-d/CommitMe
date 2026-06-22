@@ -58,6 +58,75 @@ export interface TruncatedText {
   notice?: string;
 }
 
+export interface PromptSectionBudget {
+  maxBytes: number;
+  maxLines: number;
+}
+
+export interface CommitPromptBudget {
+  profile: "compact" | "default" | "large";
+  maxBytes: number;
+  maxLines: number;
+  sections: Record<
+    | "steeringPrompt"
+    | "repositorySummary"
+    | "changedFiles"
+    | "diffStats"
+    | "changedFileSnippets"
+    | "diffExcerpts"
+    | "omittedContext"
+    | "projectMetadata",
+    PromptSectionBudget
+  >;
+}
+
+export interface CommitPromptDiagnostics {
+  budgetProfile: CommitPromptBudget["profile"];
+  maxBytes: number;
+  maxLines: number;
+  systemPromptBytes: number;
+  userPromptBytes: number;
+  textBytes: number;
+  truncationCount: number;
+}
+
+export interface CommitPromptPayload {
+  systemPrompt: string;
+  userPrompt: string;
+  summaryPrompt: string;
+  text: string;
+  truncation: TruncationMetadata[];
+  diagnostics: CommitPromptDiagnostics;
+}
+
+export interface DraftUsageDiagnostics {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  totalTokens?: number;
+}
+
+export interface DraftResponseDiagnostics {
+  stopReason?: string;
+  contentTypeCounts: Record<string, number>;
+  contentTypes: string[];
+  textCharacterCount: number;
+  usableTextCharacterCount: number;
+  empty: boolean;
+  thinkingOnly: boolean;
+  lengthStopped: boolean;
+  usage?: DraftUsageDiagnostics;
+}
+
+export interface DraftAttemptDiagnostics {
+  attempt: number;
+  purpose: "draft" | "retry" | "repair";
+  maxTokens: number;
+  response?: DraftResponseDiagnostics;
+  validationError?: string;
+}
+
 export interface ChangedFile {
   path: string;
   status: string;
@@ -135,6 +204,8 @@ export interface CommitMeToolDetails {
   hasChanges?: boolean;
   changedFiles?: ChangedFile[];
   truncation?: TruncationMetadata[];
+  prompt?: CommitPromptDiagnostics;
+  draft?: DraftAttemptDiagnostics[];
   warnings?: string[];
   committed?: CommitResult;
 }

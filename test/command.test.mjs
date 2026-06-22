@@ -199,8 +199,8 @@ test("/commitme bounds oversized prompts before model drafting", async () => {
     registerCommitMeCommand(pi, {
       draftCommitMessage: async (prompt) => {
         assert.ok(Buffer.byteLength(prompt, "utf8") < 49_200);
-        assert.match(prompt, /\[Truncated commitme prompt:/);
-        assert.match(prompt, /Return only the commit message now\.$/);
+        assert.match(prompt, /\[Truncated (?:changed file snippets|staged diff excerpt|project metadata):/);
+        assert.match(prompt, /Return only the one-line commit subject now\.$/);
         return "feat: handle large commit context";
       },
     });
@@ -208,7 +208,31 @@ test("/commitme bounds oversized prompts before model drafting", async () => {
     await registered.get("commitme").handler("", createCtx(dir, []));
 
     assert.equal(messages[0].details.action, "commit");
-    assert.ok(messages[0].details.truncation.some((entry) => entry.label === "commitme prompt" && entry.truncated));
+    assert.ok(messages[0].details.truncation.some((entry) => entry.truncated));
+    assert.ok(messages[0].details.prompt.truncationCount > 0);
+  });
+});
+
+test("/commitme aborts before staging when drafted message is invalid", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+
+    const calls = [];
+    const messages = [];
+    const notifications = [];
+    const registered = new Map();
+    const pi = createPi(calls, messages, registered);
+    registerCommitMeCommand(pi, { draftCommitMessage: async () => "update feature file" });
+
+    await assert.rejects(
+      () => registered.get("commitme").handler("", createCtx(dir, notifications)),
+      /invalid commit message draft.*did not stage or commit/i,
+    );
+    const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+
+    assert.equal(messages.length, 0);
+    assert.match(stdout, /\?\? feature\.ts/);
+    assert.equal(calls.some((call) => call.args.join(" ") === "add -A" || call.args[0] === "commit"), false);
   });
 });
 

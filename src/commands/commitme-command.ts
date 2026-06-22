@@ -1,17 +1,17 @@
-import { complete } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 import { collectGitContextTruncation, createCommitMeDetails } from "../commitme-details.ts";
 import { COMMITME_COMMAND_NAME, EXTENSION_DISPLAY_NAME } from "../constants.ts";
-import { assertNoUnsafeCommitFiles, createCommit } from "../git/commit.ts";
+import { assertNoUnsafeCommitFiles, createCommit, validateCommitMessage } from "../git/commit.ts";
 import { gatherGitContext } from "../git/context.ts";
+import { draftCommitMessageWithActiveModel, type DraftCommitMessage } from "../model/draft-commit-message.ts";
 import { buildBoundedCommitPrompt } from "../prompt/build-commit-prompt.ts";
 import type { CommitMeParseResult, CommitMeToolDetails } from "../types.ts";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
 const HELP_COMMAND = "help";
 
-export type DraftCommitMessage = (prompt: string, ctx: ExtensionCommandContext) => Promise<string>;
+export type { DraftCommitMessage } from "../model/draft-commit-message.ts";
 
 export interface RegisterCommitMeCommandOptions {
   draftCommitMessage?: DraftCommitMessage;
@@ -125,68 +125,6 @@ export function parseCommitMeArgs(rawArgs: string): CommitMeParseResult {
   };
 }
 
-function extractTextContent(content: unknown): string {
-  if (typeof content === "string") return content.trim();
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((part): part is { type: "text"; text: string } => {
-      return (
-        Boolean(part) &&
-        typeof part === "object" &&
-        "type" in part &&
-        part.type === "text" &&
-        "text" in part &&
-        typeof part.text === "string"
-      );
-    })
-    .map((part) => part.text)
-    .join("\n")
-    .trim();
-}
-
-export const draftCommitMessageWithActiveModel: DraftCommitMessage = async (prompt, ctx) => {
-  if (!ctx.model) {
-    throw new Error("No active Pi model is selected for CommitMe drafting.");
-  }
-
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
-  if (!auth.ok) {
-    throw new Error(auth.error);
-  }
-  if (!auth.apiKey) {
-    throw new Error(`No API key is available for ${ctx.model.provider}/${ctx.model.id}.`);
-  }
-
-  const response = await complete(
-    ctx.model,
-    {
-      messages: [
-        {
-          role: "user" as const,
-          content: [{ type: "text" as const, text: prompt }],
-          timestamp: Date.now(),
-        },
-      ],
-    },
-    {
-      apiKey: auth.apiKey,
-      headers: auth.headers,
-      maxTokens: 512,
-      signal: ctx.signal,
-    },
-  );
-
-  if (response.stopReason === "error") {
-    throw new Error(response.errorMessage ?? "CommitMe model request failed.");
-  }
-
-  const draft = extractTextContent(response.content);
-  if (!draft) {
-    throw new Error("CommitMe received an empty commit message draft from the model.");
-  }
-  return draft;
-};
-
 function sendCommitMeMessage(pi: ExtensionAPI, content: string, details: CommitMeToolDetails) {
   pi.sendMessage(
     {
@@ -203,16 +141,16 @@ export function buildCommitMeHelpText(): string {
   return [
     "# CommitMe help",
     "",
-    "CommitMe creates a Lightweight Conventional Commit from your current git changes.",
+    "CommitMe creates a one-line Lightweight Conventional Commit subject from your current git changes.",
     "",
     "## Commands",
     "",
     "### /commitme [steering prompt]",
-    "Generates a commit message, stages all changes with `git add -A`, and creates a local git commit.",
+    "Generates a one-line commit subject, stages all changes with `git add -A`, and creates a local git commit.",
     "Optional steering text guides the draft when it matches the actual git changes.",
     "",
     "### /commitme --confirm [steering prompt]",
-    "Generates a commit message, shows a confirmation prompt with that message, and commits only if you confirm.",
+    "Generates a one-line commit subject, shows a confirmation prompt with that subject, and commits only if you confirm.",
     "",
     "### /commitme -- --steering that starts with a dash",
     "Use `--` before steering text that begins with `-` or `--`.",
@@ -231,7 +169,7 @@ export function buildCommitMeHelpText(): string {
     "- Keep the summary clear and specific.",
     "- Do not end the summary with a period.",
     "- Use a scope when it helps identify the affected area.",
-    "- Use the body for why, `BREAKING CHANGE` for incompatible changes, and issue references when relevant.",
+    "- CommitMe creates subject-only commits: no body, footer, bullets, or explanations.",
     "",
     "## Safety",
     "",
@@ -293,14 +231,23 @@ export function registerCommitMeCommand(pi: ExtensionAPI, options: RegisterCommi
       }
       assertNoUnsafeCommitFiles(gitContext.changedFiles);
 
-      const prompt = buildBoundedCommitPrompt(gitContext, { steeringPrompt: parsed.options.steeringPrompt });
-      const draft = await draftCommitMessage(prompt.text, ctx);
+      const prompt = buildBoundedCommitPrompt(gitContext, {
+        steeringPrompt: parsed.options.steeringPrompt,
+        modelContextWindow: ctx.model?.contextWindow,
+        modelMaxTokens: ctx.model?.maxTokens,
+      });
+      const draft = await draftCommitMessage(prompt.text, ctx, prompt);
+      const validation = validateCommitMessage(draft);
+      if (!validation.ok) {
+        throw new Error(`CommitMe received an invalid commit message draft: ${validation.error} CommitMe did not stage or commit.`);
+      }
       const details = createCommitMeDetails("gather", gitContext, {
         ...(parsed.options.steeringPrompt ? { steeringPrompt: parsed.options.steeringPrompt } : {}),
-        truncation: [...collectGitContextTruncation(gitContext), prompt.truncation],
+        truncation: [...collectGitContextTruncation(gitContext), ...prompt.truncation],
+        prompt: prompt.diagnostics,
       });
 
-      const confirmed = await confirmCommitIfNeeded(ctx, draft, parsed.options.confirm);
+      const confirmed = await confirmCommitIfNeeded(ctx, validation.subject, parsed.options.confirm);
       if (!confirmed) {
         ctx.ui.notify(`${EXTENSION_DISPLAY_NAME}: commit cancelled.`, "info");
         return;
@@ -309,7 +256,7 @@ export function registerCommitMeCommand(pi: ExtensionAPI, options: RegisterCommi
       const committed = await createCommit(pi, {
         cwd: ctx.cwd,
         signal: ctx.signal,
-        message: draft,
+        message: validation.subject,
         expectedStatusPorcelain: gitContext.statusPorcelain,
       });
       sendCommitMeMessage(pi, `Committed ${committed.commitHash}: ${committed.subject}`, {

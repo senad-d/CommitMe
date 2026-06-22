@@ -57,8 +57,17 @@ async function withTempRepo(fn) {
 
 test("extractCommitMessage strips simple model wrappers", () => {
   assert.equal(extractCommitMessage("Commit message: feat: add commit helper"), "feat: add commit helper");
+  assert.equal(extractCommitMessage("Final answer: fix: handle errors"), "fix: handle errors");
   assert.equal(extractCommitMessage("```\nfix: handle errors\n```"), "fix: handle errors");
   assert.equal(extractCommitMessage('"docs: update README"'), "docs: update README");
+});
+
+test("extractCommitMessage extracts first valid Conventional Commit line", () => {
+  assert.equal(
+    extractCommitMessage("Here is the commit message:\n\n- feat(cli): add commit drafting\n\nNo extra explanation needed."),
+    "feat(cli): add commit drafting",
+  );
+  assert.equal(extractCommitMessage("I would use:\nfix: handle empty model drafts"), "fix: handle empty model drafts");
 });
 
 test("extractCommitMessage does not strip mismatched quotes", () => {
@@ -80,13 +89,13 @@ test("validateCommitMessage accepts valid subject-only Conventional Commits", ()
   assert.equal(result.body, "");
 });
 
-test("validateCommitMessage accepts subject plus body", () => {
+test("validateCommitMessage normalizes verbose model output to the subject only", () => {
   const result = validateCommitMessage("fix: handle git failures\n\nReport hook errors clearly.");
 
   assert.equal(result.ok, true);
   assert.equal(result.subject, "fix: handle git failures");
-  assert.equal(result.body, "Report hook errors clearly.");
-  assert.equal(result.message, "fix: handle git failures\n\nReport hook errors clearly.");
+  assert.equal(result.body, "");
+  assert.equal(result.message, "fix: handle git failures");
 });
 
 test("validateCommitMessage rejects malformed subjects", () => {
@@ -103,12 +112,13 @@ test("validateCommitMessage rejects summaries ending with a period", () => {
   assert.match(result.error, /must not end with a period/);
 });
 
-test("validateCommitMessage accepts breaking change footers", () => {
+test("validateCommitMessage keeps breaking-change markers only in the subject", () => {
   const result = validateCommitMessage("feat(api)!: change token contract\n\nBREAKING CHANGE: refresh tokens are now opaque.");
 
   assert.equal(result.ok, true);
   assert.equal(result.subject, "feat(api)!: change token contract");
-  assert.match(result.body, /BREAKING CHANGE/);
+  assert.equal(result.body, "");
+  assert.equal(result.message, "feat(api)!: change token contract");
 });
 
 test("findUnsafeCommitFiles blocks known secret paths and high-confidence secret content", () => {
@@ -150,6 +160,22 @@ test("createCommit stages all changes and creates a commit", async () => {
     assert.ok(calledArgs.includes("add -A"));
     assert.ok(calledArgs.includes("status --porcelain=v1"));
     assert.ok(calledArgs.includes("commit -m feat: add feature module"));
+  });
+});
+
+test("createCommit commits only the Conventional Commit subject line", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+
+    const result = await createCommit(createExecutor(), {
+      cwd: dir,
+      message: "feat: add feature module\n\nThis body should not be committed.",
+    });
+    const { stdout } = await execFileAsync("git", ["log", "-1", "--pretty=%B"], { cwd: dir });
+
+    assert.equal(result.subject, "feat: add feature module");
+    assert.equal(result.body, "");
+    assert.equal(stdout.trim(), "feat: add feature module");
   });
 });
 

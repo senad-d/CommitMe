@@ -73,12 +73,42 @@ function stripMatchingQuotes(text: string): string {
   return match?.[2]?.trim() ?? text;
 }
 
+function stripSimplePrefix(text: string): string {
+  return text
+    .replace(/^(?:final\s+answer|final\s+commit\s+message|commit\s+message|message|subject):\s*/i, "")
+    .replace(/^here(?:'s|\s+is)\s+(?:the\s+)?(?:final\s+)?(?:commit\s+message|message):\s*/i, "")
+    .trim();
+}
+
+function stripListMarker(text: string): string {
+  return text.replace(/^[-*]\s+/, "").replace(/^\d+[.)]\s+/, "").trim();
+}
+
+function cleanSubjectLineCandidate(line: string): string {
+  return stripListMarker(stripSimplePrefix(stripMatchingQuotes(line.trim()))).trim();
+}
+
+function findFirstConventionalSubjectLine(text: string): string | undefined {
+  for (const line of text.split("\n")) {
+    const candidate = cleanSubjectLineCandidate(line);
+    if (CONVENTIONAL_SUBJECT_RE.test(candidate)) return candidate;
+  }
+  return undefined;
+}
+
 export function extractCommitMessage(raw: string): string {
   let text = stripMarkdownFence(raw).replace(/\r\n/g, "\n").trim();
-  text = text.replace(/^commit message:\s*/i, "").trim();
-  text = text.replace(/^message:\s*/i, "").trim();
-  text = stripMatchingQuotes(text).trim();
-  return text;
+  text = stripMatchingQuotes(stripSimplePrefix(text)).trim();
+
+  const lines = text.split("\n");
+  const firstNonEmptyIndex = lines.findIndex((line) => line.trim().length > 0);
+  if (firstNonEmptyIndex >= 0) {
+    const cleanedFirstLine = cleanSubjectLineCandidate(lines[firstNonEmptyIndex] ?? "");
+    if (CONVENTIONAL_SUBJECT_RE.test(cleanedFirstLine)) return cleanedFirstLine;
+  }
+
+  const extractedSubject = findFirstConventionalSubjectLine(text);
+  return extractedSubject ?? text;
 }
 
 export function validateCommitMessage(raw: string): CommitMessageValidationResult {
@@ -87,9 +117,8 @@ export function validateCommitMessage(raw: string): CommitMessageValidationResul
     return { ok: false, error: "Commit message is empty." };
   }
 
-  const lines = message.split("\n");
-  const subject = lines[0]?.trim() ?? "";
-  const body = lines.slice(1).join("\n").trim();
+  const subject = message.split("\n")[0]?.trim() ?? "";
+  const body = "";
 
   if (!subject) {
     return { ok: false, error: "Commit message subject is empty." };
@@ -112,7 +141,7 @@ export function validateCommitMessage(raw: string): CommitMessageValidationResul
     ok: true,
     subject,
     body,
-    message: body ? `${subject}\n\n${body}` : subject,
+    message: subject,
   };
 }
 
