@@ -150,7 +150,7 @@ test("commitme tool commit action cancels before mutation when confirmation is d
     assert.match(result.content[0].text, /cancelled/);
     assert.equal(result.details.action, "commit");
     assert.match(stdout, /\?\? feature\.ts/);
-    assert.equal(calls.some((call) => call.args.join(" ") === "add -A" || call.args[0] === "commit"), false);
+    assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
   });
 });
 

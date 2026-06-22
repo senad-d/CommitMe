@@ -292,6 +292,8 @@ function dedupeChangedFileCandidates(files: ChangedFile[]): ChangedFile[] {
     existing.generated = existing.generated || file.generated;
     existing.binary = existing.binary || file.binary;
     existing.secretContent = existing.secretContent || file.secretContent;
+    const relatedPaths = [...(existing.relatedPaths ?? []), ...(file.relatedPaths ?? [])];
+    if (relatedPaths.length > 0) existing.relatedPaths = [...new Set(relatedPaths)];
   }
   return [...byPath.values()];
 }
@@ -470,6 +472,7 @@ function createChangedFile(path: string, status: string, scope: GitChangeScope, 
     sensitive: paths.some(isSensitivePath),
     generated: paths.some(isGeneratedPath),
     binary: paths.some(looksBinaryByPath),
+    ...(relatedPaths.length > 0 ? { relatedPaths } : {}),
   };
 }
 

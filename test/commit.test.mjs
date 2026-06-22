@@ -145,7 +145,7 @@ test("findUnsafeCommitFiles blocks known secret paths and high-confidence secret
   );
 });
 
-test("createCommit stages all changes and creates a commit", async () => {
+test("createCommit stages gathered changes and creates a commit", async () => {
   await withTempRepo(async (dir) => {
     const calls = [];
     await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
@@ -157,9 +157,63 @@ test("createCommit stages all changes and creates a commit", async () => {
     assert.equal(result.subject, "feat: add feature module");
     assert.equal(stdout.trim(), "feat: add feature module");
     const calledArgs = calls.map((call) => call.args.join(" "));
-    assert.ok(calledArgs.includes("add -A"));
+    assert.ok(calledArgs.some((args) => args.startsWith("add -A -- ") && args.includes("feature.ts")));
     assert.ok(calledArgs.includes("status --porcelain=v1"));
     assert.ok(calledArgs.includes("commit -m feat: add feature module"));
+  });
+});
+
+test("createCommit stages gathered paths without adding late unscanned files", async () => {
+  await withTempRepo(async (dir) => {
+    const calls = [];
+    const baseExecutor = createExecutor(calls);
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+
+    const executor = {
+      async exec(command, args, options = {}) {
+        if (args[0] === "add") {
+          await writeFile(join(dir, ".env"), "TOKEN=late-secret\n", "utf8");
+        }
+        return baseExecutor.exec(command, args, options);
+      },
+    };
+
+    await createCommit(executor, { cwd: dir, message: "feat: add feature module" });
+    const { stdout: committedFiles } = await execFileAsync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd: dir });
+    const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1", "-uall"], { cwd: dir });
+
+    assert.match(committedFiles, /feature\.ts/);
+    assert.doesNotMatch(committedFiles, /\.env/);
+    assert.match(status, /\?\? \.env/);
+    assert.ok(calls.some((call) => call.args[0] === "add" && call.args.includes("feature.ts") && !call.args.includes(".env")));
+  });
+});
+
+test("createCommit stages rename sources and destinations", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, "old-name.txt"), "rename fixture\n", "utf8");
+    await execFileAsync("git", ["add", "old-name.txt"], { cwd: dir });
+    await execFileAsync("git", ["commit", "-m", "chore: add rename fixture"], { cwd: dir });
+    await execFileAsync("git", ["mv", "old-name.txt", "new-name.txt"], { cwd: dir });
+
+    await createCommit(createExecutor(), { cwd: dir, message: "chore: rename fixture file" });
+    const { stdout } = await execFileAsync("git", ["show", "--name-status", "--format=", "HEAD"], { cwd: dir });
+
+    assert.match(stdout, /R\d+\s+old-name\.txt\s+new-name\.txt/);
+  });
+});
+
+test("createCommit stages tracked file deletions", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, "obsolete.txt"), "obsolete fixture\n", "utf8");
+    await execFileAsync("git", ["add", "obsolete.txt"], { cwd: dir });
+    await execFileAsync("git", ["commit", "-m", "chore: add obsolete fixture"], { cwd: dir });
+    await rm(join(dir, "obsolete.txt"));
+
+    await createCommit(createExecutor(), { cwd: dir, message: "chore: remove obsolete fixture" });
+    const { stdout } = await execFileAsync("git", ["show", "--name-status", "--format=", "HEAD"], { cwd: dir });
+
+    assert.match(stdout, /D\s+obsolete\.txt/);
   });
 });
 
@@ -208,7 +262,7 @@ test("createCommit rechecks unsafe file content before staging", async () => {
       (error) => error instanceof CommitMeCommitError && error.code === "unsafe-sensitive-files",
     );
 
-    assert.equal(calls.some((call) => call.args.join(" ") === "add -A"), false);
+    assert.equal(calls.some((call) => call.args[0] === "add"), false);
     const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
     assert.match(status, /\?\? feature\.ts/);
   });
@@ -225,7 +279,7 @@ test("createCommit rejects oversized high-confidence secret content before stagi
       (error) => error instanceof CommitMeCommitError && error.code === "unsafe-sensitive-files",
     );
 
-    assert.equal(calls.some((call) => call.args.join(" ") === "add -A"), false);
+    assert.equal(calls.some((call) => call.args[0] === "add"), false);
     const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
     assert.match(status, /\?\? large-leaked-key\.ts/);
   });
@@ -243,7 +297,7 @@ test("createCommit rejects generated high-confidence secret content before stagi
       (error) => error instanceof CommitMeCommitError && error.code === "unsafe-sensitive-files",
     );
 
-    assert.equal(calls.some((call) => call.args.join(" ") === "add -A"), false);
+    assert.equal(calls.some((call) => call.args[0] === "add"), false);
     const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1", "-uall"], { cwd: dir });
     assert.match(status, /\?\? dist\/bundle\.js/);
   });
@@ -263,7 +317,7 @@ test("createCommit rejects renamed high-confidence secret content before staging
       (error) => error instanceof CommitMeCommitError && error.code === "unsafe-sensitive-files",
     );
 
-    assert.equal(calls.some((call) => call.args.join(" ") === "add -A"), false);
+    assert.equal(calls.some((call) => call.args[0] === "add"), false);
     const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
     assert.match(status, /R  \.env -> app-config\.txt/);
   });
@@ -287,7 +341,7 @@ test("createCommit aborts before staging when git status changed after context g
       (error) => error instanceof CommitMeCommitError && error.code === "working-tree-changed",
     );
 
-    assert.equal(calls.some((call) => call.args.join(" ") === "add -A"), false);
+    assert.equal(calls.some((call) => call.args[0] === "add"), false);
     const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
     assert.match(status, /\?\? feature\.ts/);
   });

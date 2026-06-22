@@ -28,13 +28,13 @@ CommitMe is a pi extension for turning local git changes into clear one-line Lig
   </tr>
 </table>
 
-- **Local-git native:** reads your current repository and commits with `git add -A` + `git commit`.
+- **Local-git native:** reads your current repository, stages the gathered changed paths, and commits with `git commit`.
 - **Local-model friendly:** builds a compact, priority-ordered prompt, reserves output budget, normalizes drafts to one subject line, and retries/repairs weak-model drafts when safe.
 - **Safety-aware:** omits secret-like content from model context and refuses known secret files or high-confidence tokens.
 - **No push, no telemetry:** CommitMe never runs `git push` and does not send usage telemetry.
 - **Pi-native:** use it as a slash command, agent tool, global package, project-local package, git install, or source checkout.
 
-> **Security:** pi packages run with your full system permissions. CommitMe reads git/project files, runs local `git` commands, stages all changes, creates local commits, and sends bounded context to your active pi LLM provider. Read [`SECURITY.md`](SECURITY.md).
+> **Security:** pi packages run with your full system permissions. CommitMe reads git/project files, runs local `git` commands, stages gathered changed paths, creates local commits, and sends bounded context to your active pi LLM provider. Read [`SECURITY.md`](SECURITY.md).
 
 ## Table of Contents
 
@@ -74,7 +74,7 @@ When you are comfortable with the workflow, run the fast path:
 /commitme focus the message on the command steering support
 ```
 
-CommitMe will gather the current repository changes, ask your active pi model for a one-line Lightweight Conventional Commit subject, stage all changes with `git add -A`, and create a local commit. Optional steering text after the command guides the model when it matches the actual git changes. CommitMe never pushes.
+CommitMe will gather the current repository changes, ask your active pi model for a one-line Lightweight Conventional Commit subject, stage the gathered changed paths, and create a local commit. Optional steering text after the command guides the model when it matches the actual git changes. CommitMe never pushes.
 
 ---
 
@@ -123,7 +123,7 @@ Recommended first run:
 2. Start pi in the repository.
 3. Run `/commitme --confirm`, optionally followed by steering text.
 4. Review the generated message in the confirmation dialog.
-5. Confirm to stage all changes and create the commit.
+5. Confirm to stage the gathered changed paths and create the commit.
 
 Use `/commitme` only when you are comfortable with CommitMe creating the commit immediately after drafting the message. Add steering text when you know the intent and want the model to prefer your wording while still checking the git context.
 
@@ -178,7 +178,7 @@ Notes:
 
 | Command | Description |
 | --- | --- |
-| `/commitme [steering prompt]` | Generate a message, stage all changes with `git add -A`, and create a local commit. Optional steering guides wording, emphasis, type, and scope when supported by the git context. |
+| `/commitme [steering prompt]` | Generate a message, stage the gathered changed paths, and create a local commit. Optional steering guides wording, emphasis, type, and scope when supported by the git context. |
 | `/commitme --confirm [steering prompt]` | Generate a message, ask for confirmation, then commit only if you approve. |
 | `/commitme -- --steering that starts with a dash` | Use `--` before steering text that begins with `-` or `--`. |
 | `/commitme help` | Show in-session help. `/commitme --help` and `/commitme -h` also work. |
@@ -194,7 +194,7 @@ CommitMe also registers a `commitme` tool for agents.
 | Tool action | Behavior |
 | --- | --- |
 | `action: "gather"` | Read-only. Returns compact git/project context and a subject-line prompt. Accepts optional `steeringPrompt` guidance. |
-| `action: "commit"` | Requires an explicit final one-line `message`; stages all changes and creates a local commit. |
+| `action: "commit"` | Requires an explicit final one-line `message`; stages gathered changed paths and creates a local commit. |
 
 Use the tool when you want pi to draft a message without immediately committing, or when another workflow needs bounded git context.
 

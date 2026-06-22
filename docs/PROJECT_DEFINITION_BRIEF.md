@@ -22,7 +22,7 @@ Approved during preparation on 2026-06-21.
 - Primary use cases:
   - Draft a precise Conventional Commit message from staged and unstaged changes.
   - Programmatically gather relevant git/project context before prompting the LLM.
-  - Optionally stage all changes and commit with the generated message.
+  - Optionally stage gathered changed paths and commit with the generated message.
 - Non-goals:
   - No automatic background commits.
   - No remote APIs beyond the active Pi LLM provider.
@@ -71,7 +71,7 @@ Approved during preparation on 2026-06-21.
 ## 7. Security and privacy
 
 - Shell execution: local `git` commands only via `pi.exec`.
-- File access/mutation: read project metadata and changed files; mutate only via `git add -A` and `git commit` when commit mode is requested.
+- File access/mutation: read project metadata and changed files; mutate only by staging gathered changed paths and running `git commit` when commit mode is requested.
 - Network access: none except active Pi LLM provider.
 - Credentials/secrets: do not intentionally read env/secrets; avoid `.env` content.
 - Telemetry/retention: none.
@@ -101,8 +101,8 @@ Approved during preparation on 2026-06-21.
   - Confirm repository URL: `https://github.com/senad-d/commitme`?
   - Confirm security contact before public publishing.
 - Assumptions:
-  - `/commitme` stages all changes and commits without confirmation.
-  - `/commitme --confirm` asks before `git add -A` and `git commit`.
+  - `/commitme` stages gathered changed paths and commits without confirmation.
+  - `/commitme --confirm` asks before staging gathered changed paths and running `git commit`.
   - Tool name is exactly `commitme`.
   - MIT license is retained from the template.
 - Decisions:

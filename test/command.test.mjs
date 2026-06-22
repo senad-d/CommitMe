@@ -126,7 +126,7 @@ test("/commitme reports no changes without drafting or mutating", async () => {
 
     assert.equal(messages.length, 0);
     assert.ok(notifications.some((notice) => /no staged or unstaged git changes/.test(notice.message)));
-    assert.equal(calls.some((call) => call.args.join(" ") === "add -A" || call.args[0] === "commit"), false);
+    assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
   });
 });
 
@@ -156,7 +156,7 @@ test("/commitme creates a commit without prompting by default", async () => {
     assert.match(messages[0].content, /Committed/);
     assert.equal(messages[0].details.action, "commit");
     assert.equal(notifications.some((notice) => /committed/.test(notice.message)), false);
-    assert.ok(calls.some((call) => call.args.join(" ") === "add -A"));
+    assert.ok(calls.some((call) => call.args[0] === "add"));
   });
 });
 
@@ -232,7 +232,7 @@ test("/commitme aborts before staging when drafted message is invalid", async ()
 
     assert.equal(messages.length, 0);
     assert.match(stdout, /\?\? feature\.ts/);
-    assert.equal(calls.some((call) => call.args.join(" ") === "add -A" || call.args[0] === "commit"), false);
+    assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
   });
 });
 
@@ -254,7 +254,7 @@ test("/commitme --commit remains a non-confirming commit alias", async () => {
 
     assert.equal(stdout.trim(), "feat: add feature module");
     assert.equal(messages[0].details.action, "commit");
-    assert.ok(calls.some((call) => call.args.join(" ") === "add -A"));
+    assert.ok(calls.some((call) => call.args[0] === "add"));
   });
 });
 
@@ -281,7 +281,7 @@ test("/commitme refuses sensitive changed files before drafting or staging", asy
 
     assert.equal(messages.length, 0);
     assert.match(stdout, /\?\? \.env/);
-    assert.equal(calls.some((call) => call.args.join(" ") === "add -A" || call.args[0] === "commit"), false);
+    assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
   });
 });
 
@@ -310,7 +310,7 @@ test("/commitme aborts before staging when git status changes after drafting", a
     assert.equal(messages.length, 0);
     assert.match(stdout, /\?\? feature\.ts/);
     assert.match(stdout, /\?\? late\.ts/);
-    assert.equal(calls.some((call) => call.args.join(" ") === "add -A" || call.args[0] === "commit"), false);
+    assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
   });
 });
 
@@ -330,7 +330,7 @@ test("/commitme --confirm cancels before mutation", async () => {
 
     assert.equal(messages.length, 0);
     assert.match(stdout, /\?\? feature\.ts/);
-    assert.equal(calls.some((call) => call.args.join(" ") === "add -A" || call.args[0] === "commit"), false);
+    assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
     assert.ok(notifications.some((notice) => /commit cancelled/.test(notice.message)));
   });
 });

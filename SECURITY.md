@@ -11,11 +11,11 @@ pi install git:https://github.com/senad-d/commitme@<tag>
 
 ## Runtime security behavior
 
-- `/commitme` is an explicit user-triggered commit command: it reads git/project context, drafts a bounded subject-line prompt with the active Pi LLM provider, validates and normalizes the final one-line subject, stages all changes with `git add -A`, and creates a local git commit with `git commit`.
+- `/commitme` is an explicit user-triggered commit command: it reads git/project context, drafts a bounded subject-line prompt with the active Pi LLM provider, validates and normalizes the final one-line subject, stages the gathered changed paths, and creates a local git commit with `git commit`.
 - `/commitme --confirm` requests confirmation before staging and committing.
 - Tool `action: "gather"` is read-only and returns compact commit context.
 - Tool `action: "commit"` requires an explicit final one-line subject and creates a local commit.
-- Commit actions abort before staging if known secret files or high-confidence secret tokens would be committed or if the drafted subject cannot be validated after cleanup/retry/repair; they recheck the current working tree for unsafe content immediately before staging and stop if git status changes after context gathering.
+- Commit actions abort before staging if known secret files or high-confidence secret tokens would be committed or if the drafted subject cannot be validated after cleanup/retry/repair; they recheck the current working tree for unsafe content immediately before staging, stop if git status changes after context gathering, and avoid staging unrelated paths that appear after the final changed-file scan.
 - Oversized, generated, binary-looking, renamed, and symlinked changed files are omitted from model context when appropriate; CommitMe still scans regular local file content for high-confidence secret tokens before staging, and symlinks to sensitive repository paths are treated as unsafe.
 - Confirmation is requested only when `--confirm` or tool `confirm: true` is set. UI confirmation modes fail before context gathering or model drafting when no UI is available.
 - CommitMe never runs `git push`.

@@ -146,7 +146,7 @@ export function buildCommitMeHelpText(): string {
     "## Commands",
     "",
     "### /commitme [steering prompt]",
-    "Generates a one-line commit subject, stages all changes with `git add -A`, and creates a local git commit.",
+    "Generates a one-line commit subject, stages the gathered changed paths, and creates a local git commit.",
     "Optional steering text guides the draft when it matches the actual git changes.",
     "",
     "### /commitme --confirm [steering prompt]",

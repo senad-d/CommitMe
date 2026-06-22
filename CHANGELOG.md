@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Limited commit staging to the changed paths gathered during the final safety scan so unrelated files that appear later are not swept into the commit.
 - Stopped reading symlink target contents into model context while preserving unsafe handling for symlinks that point at sensitive repository paths.
 - Escaped all ASCII control characters in prompt-rendered paths to avoid malformed prompt sections or terminal control output from unusual filenames.
 - Aligned `commitme` gather-tool prompt sizing with the active model context window and output-token budget.

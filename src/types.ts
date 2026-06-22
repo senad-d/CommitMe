@@ -135,6 +135,7 @@ export interface ChangedFile {
   sensitive: boolean;
   generated: boolean;
   binary: boolean;
+  relatedPaths?: string[];
   secretContent?: boolean;
 }
 

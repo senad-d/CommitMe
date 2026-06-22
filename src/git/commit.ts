@@ -39,6 +39,39 @@ function isDeletionStatus(status: string): boolean {
   return status.trim() === "D";
 }
 
+function collectChangedFilePathspecs(files: ChangedFile[]): { add: string[]; remove: string[] } {
+  const add = new Set<string>();
+  const remove = new Set<string>();
+  for (const file of files) {
+    if (isDeletionStatus(file.status)) {
+      remove.add(file.path);
+    } else {
+      add.add(file.path);
+    }
+
+    if (file.status.startsWith("R")) {
+      for (const relatedPath of file.relatedPaths ?? []) remove.add(relatedPath);
+    }
+  }
+  return {
+    add: [...add].sort((a, b) => a.localeCompare(b)),
+    remove: [...remove].sort((a, b) => a.localeCompare(b)),
+  };
+}
+
+async function assertGitStatusUnchanged(
+  executor: CommitMeExecutor,
+  expectedStatusPorcelain: string,
+  options: CommitMeExecOptions,
+): Promise<void> {
+  const currentStatus = (await runGit(executor, STATUS_PORCELAIN_ARGS, options)).stdout.trim();
+  if (currentStatus !== expectedStatusPorcelain.trim()) {
+    throw new CommitMeCommitError("Git status changed since CommitMe gathered context; rerun CommitMe before committing.", {
+      code: "working-tree-changed",
+    });
+  }
+}
+
 export function findUnsafeCommitFiles(files: ChangedFile[]): ChangedFile[] {
   const byPath = new Map<string, ChangedFile>();
   for (const file of files) {
@@ -153,18 +186,24 @@ export async function createCommit(executor: CommitMeExecutor, options: CreateCo
 
   const commonOptions = { cwd: options.cwd, signal: options.signal, timeout: options.timeout ?? DEFAULT_COMMIT_TIMEOUT_MS };
   if (options.expectedStatusPorcelain !== undefined) {
-    const currentStatus = (await runGit(executor, STATUS_PORCELAIN_ARGS, commonOptions)).stdout.trim();
-    if (currentStatus !== options.expectedStatusPorcelain.trim()) {
-      throw new CommitMeCommitError("Git status changed since CommitMe gathered context; rerun CommitMe before committing.", {
-        code: "working-tree-changed",
-      });
-    }
+    await assertGitStatusUnchanged(executor, options.expectedStatusPorcelain, commonOptions);
   }
 
   const currentContext = await gatherGitContext(executor, commonOptions);
   assertNoUnsafeCommitFiles(currentContext.changedFiles);
+  await assertGitStatusUnchanged(executor, currentContext.statusPorcelain, commonOptions);
 
-  await runGit(executor, ["add", "-A"], commonOptions);
+  const changedPathspecs = collectChangedFilePathspecs(currentContext.changedFiles);
+  if (changedPathspecs.add.length === 0 && changedPathspecs.remove.length === 0) {
+    throw new CommitMeCommitError("No git changes to commit after gathering context.", { code: "no-changes" });
+  }
+
+  if (changedPathspecs.add.length > 0) {
+    await runGit(executor, ["add", "-A", "--", ...changedPathspecs.add], commonOptions);
+  }
+  if (changedPathspecs.remove.length > 0) {
+    await runGit(executor, ["rm", "--cached", "--ignore-unmatch", "--", ...changedPathspecs.remove], commonOptions);
+  }
 
   const status = (await runGit(executor, ["status", "--porcelain=v1"], commonOptions)).stdout.trim();
   if (!status) {

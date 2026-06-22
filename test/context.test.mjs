@@ -100,6 +100,7 @@ test("parseNameStatusZ handles renamed paths with spaces", () => {
   assert.equal(files[0].path, "new name.txt");
   assert.equal(files[0].status, "R100");
   assert.equal(files[0].scope, "staged");
+  assert.deepEqual(files[0].relatedPaths, [".env"]);
   assert.equal(files[0].sensitive, true);
 });
 
