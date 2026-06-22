@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Hardened commit safety checks so oversized changed files and renames from sensitive paths are still scanned locally for high-confidence secret tokens before staging.
+- Added early validation for `commitme` tool `action: "commit"` messages so invalid subjects fail before reading git context or prompting for confirmation.
 - Added optional steering prompts for `/commitme [steering prompt]` and `/commitme --confirm [steering prompt]`.
 - Added `steeringPrompt` support to the `commitme` gather tool so agent workflows can guide commit-message drafting.
 - Improved local-model drafting reliability with system/user prompt parts, priority-budgeted context, weak-model drafting instructions, response diagnostics, retry/repair handling for empty/thinking-only/length-stopped/invalid drafts, and validation before staging.

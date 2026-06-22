@@ -237,6 +237,8 @@ For command drafting, CommitMe uses separate system and repository-context promp
 - CommitMe uses only local `git` commands and the active pi LLM provider.
 - `/commitme --confirm` requires a UI-capable pi mode.
 - Commit actions abort before staging if known secret files or high-confidence secret tokens would be committed.
+- Large changed files are omitted from model context, but CommitMe still streams them locally to detect high-confidence secret tokens before staging.
+- Renames from sensitive paths stay omitted from model context and are checked for high-confidence secret tokens at their new path.
 - Commit actions recheck unsafe content immediately before staging.
 - Commit actions stop if git status changes after context gathering.
 - Commit actions validate and normalize the drafted message to one subject line before confirmation, staging, or committing.

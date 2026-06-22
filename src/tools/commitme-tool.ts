@@ -4,7 +4,7 @@ import { Type, type Static } from "typebox";
 
 import { collectGitContextTruncation, createCommitMeDetails } from "../commitme-details.ts";
 import { COMMITME_TOOL_NAME, EXTENSION_DISPLAY_NAME } from "../constants.ts";
-import { assertNoUnsafeCommitFiles, createCommit } from "../git/commit.ts";
+import { assertNoUnsafeCommitFiles, createCommit, validateCommitMessage } from "../git/commit.ts";
 import { gatherGitContext } from "../git/context.ts";
 import { buildBoundedCommitPrompt } from "../prompt/build-commit-prompt.ts";
 
@@ -26,11 +26,16 @@ export const CommitMeToolParameters = Type.Object({
 
 export type CommitMeToolInput = Static<typeof CommitMeToolParameters>;
 
-function requireCommitMessage(message: string | undefined): string {
+function requireValidCommitMessage(message: string | undefined): string {
   if (!message || message.trim().length === 0) {
     throw new Error("commitme action=commit requires a final one-line Lightweight Conventional Commit subject.");
   }
-  return message;
+
+  const validation = validateCommitMessage(message);
+  if (!validation.ok) {
+    throw new Error(`commitme action=commit received an invalid Lightweight Conventional Commit subject: ${validation.error}`);
+  }
+  return validation.subject;
 }
 
 export function createCommitMeTool(pi: ExtensionAPI) {
@@ -55,7 +60,7 @@ export function createCommitMeTool(pi: ExtensionAPI) {
       const action = params.action ?? "gather";
 
       if (action === "commit") {
-        const message = requireCommitMessage(params.message);
+        const message = requireValidCommitMessage(params.message);
         if (params.confirm && !ctx.hasUI) {
           throw new Error("commitme confirm=true requires a UI-capable Pi mode.");
         }

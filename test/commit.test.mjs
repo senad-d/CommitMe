@@ -214,6 +214,43 @@ test("createCommit rechecks unsafe file content before staging", async () => {
   });
 });
 
+test("createCommit rejects oversized high-confidence secret content before staging", async () => {
+  await withTempRepo(async (dir) => {
+    const calls = [];
+    const syntheticKey = `sk-${"AbCdEfGhIjKlMnOpQrStUvWxYz012345"}`;
+    await writeFile(join(dir, "large-leaked-key.ts"), `${"a".repeat(140_000)}\n${syntheticKey}\n`, "utf8");
+
+    await assert.rejects(
+      () => createCommit(createExecutor(calls), { cwd: dir, message: "feat: add feature module" }),
+      (error) => error instanceof CommitMeCommitError && error.code === "unsafe-sensitive-files",
+    );
+
+    assert.equal(calls.some((call) => call.args.join(" ") === "add -A"), false);
+    const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+    assert.match(status, /\?\? large-leaked-key\.ts/);
+  });
+});
+
+test("createCommit rejects renamed high-confidence secret content before staging", async () => {
+  await withTempRepo(async (dir) => {
+    const calls = [];
+    const syntheticKey = `sk-${"AbCdEfGhIjKlMnOpQrStUvWxYz012345"}`;
+    await writeFile(join(dir, ".env"), `TOKEN=${syntheticKey}\n`, "utf8");
+    await execFileAsync("git", ["add", ".env"], { cwd: dir });
+    await execFileAsync("git", ["commit", "-m", "chore: add env fixture"], { cwd: dir });
+    await execFileAsync("git", ["mv", ".env", "app-config.txt"], { cwd: dir });
+
+    await assert.rejects(
+      () => createCommit(createExecutor(calls), { cwd: dir, message: "feat: add feature module" }),
+      (error) => error instanceof CommitMeCommitError && error.code === "unsafe-sensitive-files",
+    );
+
+    assert.equal(calls.some((call) => call.args.join(" ") === "add -A"), false);
+    const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+    assert.match(status, /R  \.env -> app-config\.txt/);
+  });
+});
+
 test("createCommit aborts before staging when git status changed after context gathering", async () => {
   await withTempRepo(async (dir) => {
     const calls = [];

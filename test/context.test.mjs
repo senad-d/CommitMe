@@ -318,6 +318,24 @@ test("gatherGitContext marks high-confidence secret content without exposing it"
   });
 });
 
+test("gatherGitContext marks oversized high-confidence secret content without exposing it", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    const syntheticKey = `sk-${"AbCdEfGhIjKlMnOpQrStUvWxYz012345"}`;
+    await writeFile(join(dir, "large-leaked-key.ts"), `${"a".repeat(140_000)}\n${syntheticKey}\n`, "utf8");
+    await git(dir, ["add", "large-leaked-key.ts"]);
+
+    const context = await gatherGitContext(createExecutor(), { cwd: dir });
+    const file = context.changedFiles.find((entry) => entry.path === "large-leaked-key.ts");
+    const combinedContext = JSON.stringify(context.project) + context.staged.excerpt + context.unstaged.excerpt;
+
+    assert.equal(file?.sensitive, true);
+    assert.equal(file?.secretContent, true);
+    assert.ok(context.project.skipped.some((entry) => entry.path === "large-leaked-key.ts" && entry.reason === "sensitive"));
+    assert.doesNotMatch(combinedContext, new RegExp(syntheticKey));
+  });
+});
+
 test("gatherGitContext treats token-bearing npm config as sensitive", async () => {
   await withTempDir(async (dir) => {
     await initRepo(dir);
@@ -365,6 +383,26 @@ test("gatherGitContext redacts renamed token-looking content through new paths",
     assert.ok(context.changedFiles.some((file) => file.path === "app-config.txt"));
     assert.match(combinedContext, /\[redacted sensitive line\]/);
     assert.doesNotMatch(combinedContext, /renamed-secret/);
+  });
+});
+
+test("gatherGitContext marks renamed high-confidence secret content through new paths", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    const syntheticKey = `sk-${"AbCdEfGhIjKlMnOpQrStUvWxYz012345"}`;
+    await writeFile(join(dir, ".env"), `TOKEN=${syntheticKey}\n`, "utf8");
+    await git(dir, ["add", ".env"]);
+    await git(dir, ["commit", "-m", "chore: add env fixture"]);
+    await git(dir, ["mv", ".env", "app-config.txt"]);
+
+    const context = await gatherGitContext(createExecutor(), { cwd: dir });
+    const file = context.changedFiles.find((entry) => entry.path === "app-config.txt");
+    const combinedContext = JSON.stringify(context.project) + context.staged.excerpt + context.unstaged.excerpt;
+
+    assert.equal(file?.sensitive, true);
+    assert.equal(file?.secretContent, true);
+    assert.ok(context.project.skipped.some((entry) => entry.path === "app-config.txt" && entry.reason === "sensitive"));
+    assert.doesNotMatch(combinedContext, new RegExp(syntheticKey));
   });
 });
 

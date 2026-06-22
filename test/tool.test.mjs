@@ -74,7 +74,8 @@ test("commitme tool gathers compact context with structured details", async () =
     const text = result.content[0].text;
 
     assert.match(text, /CommitMe gathered local git context/);
-    assert.match(text, /Return only one Lightweight Conventional Commit subject line/);    assert.match(text, /feature\.ts/);
+    assert.match(text, /Return only one Lightweight Conventional Commit subject line/);
+    assert.match(text, /feature\.ts/);
     assert.equal(result.details.action, "gather");
     assert.match(result.details.statusPorcelain, /feature\.ts/);
     assert.equal(result.details.hasChanges, true);
@@ -191,6 +192,29 @@ test("commitme tool commit action requires an explicit message before reading gi
   await assert.rejects(
     () => tool.execute("tool-call", { action: "commit" }, undefined, undefined, { cwd: "/tmp", hasUI: false }),
     /requires a final one-line Lightweight Conventional Commit subject/,
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("commitme tool commit action rejects invalid messages before reading git", async () => {
+  const calls = [];
+  const tool = createCommitMeTool({
+    async exec(command, args) {
+      calls.push({ command, args });
+      throw new Error("git should not run with an invalid commit subject");
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      tool.execute(
+        "tool-call",
+        { action: "commit", message: "update the docs" },
+        undefined,
+        undefined,
+        { cwd: "/tmp", hasUI: false },
+      ),
+    /invalid Lightweight Conventional Commit subject/,
   );
   assert.equal(calls.length, 0);
 });

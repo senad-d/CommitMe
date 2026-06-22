@@ -16,6 +16,7 @@ pi install git:https://github.com/senad-d/commitme@<tag>
 - Tool `action: "gather"` is read-only and returns compact commit context.
 - Tool `action: "commit"` requires an explicit final one-line subject and creates a local commit.
 - Commit actions abort before staging if known secret files or high-confidence secret tokens would be committed or if the drafted subject cannot be validated after cleanup/retry/repair; they recheck the current working tree for unsafe content immediately before staging and stop if git status changes after context gathering.
+- Oversized changed files and renames from sensitive paths are omitted from model context, but CommitMe still scans the local file content for high-confidence secret tokens before staging.
 - Confirmation is requested only when `--confirm` or tool `confirm: true` is set. UI confirmation modes fail before context gathering or model drafting when no UI is available.
 - CommitMe never runs `git push`.
 - CommitMe does not send telemetry.

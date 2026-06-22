@@ -1,3 +1,4 @@
+import { createReadStream } from "node:fs";
 import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
@@ -27,6 +28,8 @@ import {
 import { appendTruncationNotice, truncateText } from "../utils/truncation.ts";
 
 const CONTENT_SENSITIVITY_SCAN_MAX_BYTES = 128_000;
+const SECRET_SCAN_CHUNK_BYTES = 64_000;
+const SECRET_SCAN_OVERLAP_CHARS = 4_096;
 const SECRET_ASSIGNMENT_RE =
   /(?:^|[^A-Za-z0-9])(?:api[_-]?key|access[_-]?key|access[_-]?token|auth[_-]?token|bearer[_-]?token|client[_-]?secret|credential|credentials|id[_-]?token|password|passwd|private[_-]?key|refresh[_-]?token|secret|session[_-]?token|token)\s*[:=]\s*[^\s#]+/i;
 const HIGH_CONFIDENCE_SECRET_RE =
@@ -301,23 +304,57 @@ function skippedReasonForChangedFile(file: ChangedFile): SkippedProjectContextEn
   return undefined;
 }
 
+async function scanFileForHighConfidenceSecret(path: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const stream = createReadStream(path, { encoding: "utf8", highWaterMark: SECRET_SCAN_CHUNK_BYTES });
+    let settled = false;
+    let tail = "";
+
+    function settle(value: boolean) {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+      stream.destroy();
+    }
+
+    stream.on("data", (chunk) => {
+      const text = `${tail}${chunk}`;
+      if (looksHighConfidenceSecretContent(text)) {
+        settle(true);
+        return;
+      }
+      tail = text.slice(-SECRET_SCAN_OVERLAP_CHARS);
+    });
+    stream.once("end", () => settle(false));
+    stream.once("error", (error) => {
+      if (!settled) reject(error);
+    });
+  });
+}
+
+async function changedFileHasHighConfidenceSecret(root: string, path: string): Promise<boolean> {
+  try {
+    const resolved = await getReadableRepositoryFile(root, path);
+    if (typeof resolved !== "string") return resolved.reason === "sensitive";
+    return await scanFileForHighConfidenceSecret(resolved);
+  } catch {
+    return false;
+  }
+}
+
 async function applyContentSensitivity(root: string, changedFiles: ChangedFile[]): Promise<ChangedFile[]> {
   const scannedPaths = new Map<string, boolean>();
   const output: ChangedFile[] = [];
 
   for (const file of changedFiles) {
-    if (file.sensitive || file.generated || file.binary || file.status.startsWith("D")) {
+    if (isKnownSecretPath(file.path) || file.generated || file.binary || file.status.startsWith("D")) {
       output.push(file);
       continue;
     }
 
     let contentSensitive = scannedPaths.get(file.path);
     if (contentSensitive === undefined) {
-      const entry = await readContextEntry(root, file.path, "changed-file-snippet", {
-        projectFileMaxBytes: CONTENT_SENSITIVITY_SCAN_MAX_BYTES,
-        projectFileMaxLines: Number.MAX_SAFE_INTEGER,
-      });
-      contentSensitive = !isProjectContextEntry(entry) && entry.reason === "sensitive";
+      contentSensitive = await changedFileHasHighConfidenceSecret(root, file.path);
       scannedPaths.set(file.path, contentSensitive);
     }
 
