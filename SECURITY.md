@@ -23,7 +23,7 @@ pi install git:https://github.com/senad-d/commitme@<tag>
 - CommitMe does not call non-LLM network APIs.
 - CommitMe uses only the active Pi LLM provider for command message drafting, including one safe retry or repair prompt when needed.
 - Drafting diagnostics are non-sensitive: they report stop reason, content block type counts, text length, token usage totals when available, and prompt truncation metadata. They do not include raw prompts, raw diffs, file contents, secrets, or raw model output.
-- CommitMe avoids intentionally reading secret files such as `.env`, `.envrc`, private keys, kubeconfigs, and credential stores.
+- CommitMe avoids intentionally reading secret files such as `.env`, `.envrc`, private keys, kubeconfigs, and credential stores. `.env.*` files are allowed by path, but their contents still pass through redaction and high-confidence token scanning.
 - Sensitive, generated, binary-looking, unreadable, overly large, symlinked, symlink-aliased, or secret-like changed-file contents may be listed by path/status but are omitted from model context. Generated and binary-looking regular files are still locally checked for high-confidence token patterns before commit actions stage changes; unreadable changed files are refused because they cannot be scanned safely.
 - Diff excerpts are collected with Git external diff and textconv disabled, then filtered through path checks, content checks, and line-level redaction before they are sent to the active Pi LLM provider.
 

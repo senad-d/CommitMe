@@ -55,7 +55,7 @@ src/
 - Optional confirmation runs only when requested.
 - There is no `git push`, telemetry, or non-LLM network API usage.
 - Secret-like, generated, binary-looking, unreadable, symlinked, symlink-aliased, and overly large changed-file contents are filtered from model context; symlinks to sensitive repository paths are marked unsafe.
-- Commit actions refuse known secret files, unreadable changed files, or high-confidence secret-token content before staging, including high-confidence tokens found in generated or binary-looking regular changed paths, recheck current content immediately before staging, abort if git status changes after context gathering, and avoid staging unrelated paths that appear after the final changed-file scan.
+- Commit actions refuse known secret files, unreadable changed files, or high-confidence secret-token content before staging, including high-confidence tokens found in generated, binary-looking, or `.env.*` regular changed paths, recheck current content immediately before staging, abort if git status changes after context gathering, and avoid staging unrelated paths that appear after the final changed-file scan.
 - Git diff collection disables external diff and textconv commands.
 - Git status parsing uses NUL-delimited `-uall` output internally so untracked directories, paths with spaces, and special characters are handled safely.
 

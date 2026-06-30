@@ -121,16 +121,22 @@ export async function getBranchName(
   return { branch: head.length > 0 ? `HEAD:${head}` : "HEAD", isDetachedHead: true };
 }
 
+function isDotEnvVariantPath(path: string): boolean {
+  const basename = path.replace(/\\/g, "/").split("/").at(-1)?.toLowerCase() ?? "";
+  return basename.startsWith(".env.");
+}
+
 export function isKnownSecretPath(path: string): boolean {
   const normalized = path.replace(/\\/g, "/");
   const segments = normalized.split("/").map((segment) => segment.toLowerCase());
   const basename = segments.at(-1) ?? "";
   const parentDirectories = new Set(segments.slice(0, -1));
 
+  if (isDotEnvVariantPath(path)) return false;
+
   return (
     basename === ".env" ||
     basename === ".envrc" ||
-    basename.startsWith(".env.") ||
     basename === ".dockercfg" ||
     basename === ".netrc" ||
     basename === ".npmrc" ||
@@ -151,6 +157,7 @@ export function isKnownSecretPath(path: string): boolean {
 }
 
 export function isSensitivePath(path: string): boolean {
+  if (isDotEnvVariantPath(path)) return false;
   const basename = path.replace(/\\/g, "/").split("/").at(-1)?.toLowerCase() ?? "";
   return isKnownSecretPath(path) || /(^|[._-])token([._-]|$)/i.test(basename);
 }

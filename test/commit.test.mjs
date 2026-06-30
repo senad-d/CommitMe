@@ -125,6 +125,7 @@ test("validateCommitMessage keeps breaking-change markers only in the subject", 
 test("findUnsafeCommitFiles blocks known secret paths, unreadable files, and high-confidence secret content", () => {
   const unsafe = findUnsafeCommitFiles([
     { path: ".env", status: "??", scope: "unstaged", sensitive: true, generated: false, binary: false },
+    { path: ".env.example", status: "??", scope: "unstaged", sensitive: false, generated: false, binary: false },
     { path: ".aws/credentials", status: "D", scope: "unstaged", sensitive: true, generated: false, binary: false },
     { path: "src/index.ts", status: "M", scope: "unstaged", sensitive: false, generated: false, binary: false },
     { path: "src/example.ts", status: "M", scope: "unstaged", sensitive: true, generated: false, binary: false },
@@ -188,6 +189,34 @@ test("createCommit stages gathered changes and creates a commit", async () => {
     assert.ok(calledArgs.some((args) => args.startsWith("add -A -- ") && args.includes("feature.ts")));
     assert.ok(calledArgs.includes("status --porcelain=v1"));
     assert.ok(calledArgs.includes("commit -m feat: add feature module"));
+  });
+});
+
+test("createCommit allows .env.* files without high-confidence secrets", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, ".env.example"), "GITHUB_TOKEN=\n# GH_TOKEN=\n", "utf8");
+
+    await createCommit(createExecutor(), { cwd: dir, message: "docs: add env example" });
+    const { stdout } = await execFileAsync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd: dir });
+
+    assert.match(stdout, /^\.env\.example$/m);
+  });
+});
+
+test("createCommit rejects high-confidence tokens in .env.* files before staging", async () => {
+  await withTempRepo(async (dir) => {
+    const calls = [];
+    const syntheticKey = `sk-${"AbCdEfGhIjKlMnOpQrStUvWxYz012345"}`;
+    await writeFile(join(dir, ".env.local"), `OPENAI_API_KEY=${syntheticKey}\n`, "utf8");
+
+    await assert.rejects(
+      () => createCommit(createExecutor(calls), { cwd: dir, message: "chore: add local env" }),
+      (error) => error instanceof CommitMeCommitError && error.code === "unsafe-sensitive-files",
+    );
+
+    assert.equal(calls.some((call) => call.args[0] === "add"), false);
+    const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+    assert.match(stdout, /\?\? \.env\.local/);
   });
 });
 

@@ -10,6 +10,7 @@ import {
   gatherGitContext,
   getRepositoryRoot,
   GitCommandError,
+  isKnownSecretPath,
   parseNameStatusZ,
   parseStatusPorcelainZ,
   runGit,
@@ -91,6 +92,14 @@ test("runGit throws structured errors for failed git commands", async () => {
       (error) => error instanceof GitCommandError && error.code === "git-command-failed",
     );
   });
+});
+
+test("isKnownSecretPath allows dotenv variant files by path", () => {
+  assert.equal(isKnownSecretPath(".env"), true);
+  assert.equal(isKnownSecretPath(".envrc"), true);
+  assert.equal(isKnownSecretPath(".env.example"), false);
+  assert.equal(isKnownSecretPath("config/.env.local"), false);
+  assert.equal(isKnownSecretPath("config/.env.production"), false);
 });
 
 test("parseNameStatusZ handles renamed paths with spaces", () => {
@@ -329,6 +338,24 @@ test("gatherGitContext treats .envrc files as sensitive", async () => {
     assert.ok(context.changedFiles.some((file) => file.path === ".envrc" && file.sensitive));
     assert.ok(context.project.skipped.some((entry) => entry.path === ".envrc" && entry.reason === "sensitive"));
     assert.doesNotMatch(combinedContext, /envrc-secret/);
+  });
+});
+
+test("gatherGitContext allows .env.* files by path while redacting secret-like assignments", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    await writeFile(join(dir, ".env.example"), "GITHUB_TOKEN=\nPASSWORD=not-real\nSAFE_FLAG=true\n", "utf8");
+    await git(dir, ["add", ".env.example"]);
+
+    const context = await gatherGitContext(createExecutor(), { cwd: dir });
+    const file = context.changedFiles.find((entry) => entry.path === ".env.example");
+    const combinedContext = JSON.stringify(context.project) + context.staged.excerpt + context.unstaged.excerpt;
+
+    assert.equal(file?.sensitive, false);
+    assert.ok(context.project.changedFileSnippets.some((entry) => entry.path === ".env.example"));
+    assert.match(combinedContext, /SAFE_FLAG=true/);
+    assert.match(combinedContext, /\[redacted sensitive line\]/);
+    assert.doesNotMatch(combinedContext, /not-real/);
   });
 });
 

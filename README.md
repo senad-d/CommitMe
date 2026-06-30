@@ -237,6 +237,7 @@ For command drafting and gather-tool prompts, CommitMe uses separate system and 
 - CommitMe uses only local `git` commands and the active pi LLM provider.
 - `/commitme --confirm` requires a UI-capable pi mode.
 - Commit actions abort before staging if known secret files, unreadable changed files, or high-confidence secret tokens would be committed.
+- `.env.*` files such as `.env.example`, `.env.local`, and `.env.production` are allowed by path; their contents are still redacted for model context and scanned for high-confidence secret tokens before staging.
 - Large, generated, binary-looking, unreadable, symlinked, and symlink-aliased changed-file contents are omitted from model context, but CommitMe still scans regular changed files locally to detect high-confidence secret tokens before staging.
 - Renames from sensitive paths and symlinks to sensitive repository paths stay omitted from model context and are checked or marked unsafe before staging.
 - Commit actions recheck unsafe content immediately before staging.
