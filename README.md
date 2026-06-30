@@ -194,9 +194,10 @@ CommitMe also registers a `commitme` tool for agents.
 | Tool action | Behavior |
 | --- | --- |
 | `action: "gather"` | Read-only. Returns compact git/project context and a subject-line prompt. Accepts optional `steeringPrompt` guidance. |
-| `action: "commit"` | Requires an explicit final one-line `message`; stages gathered changed paths and creates a local commit. |
+| `action: "commit", message: "..."` | Uses the provided final one-line subject, stages gathered changed paths, and creates a local commit. This path does not need an active model. |
+| `action: "commit"` without `message` | One-shot `/commitme` parity path. Gathers context, drafts with the active pi model, validates the subject, optionally confirms when `confirm: true`, stages gathered changed paths, and creates a local commit. Accepts optional `steeringPrompt`. |
 
-Use the tool when you want pi to draft a message without immediately committing, or when another workflow needs bounded git context.
+Use `action: "gather"` when you want pi to draft a message without immediately committing, or when another workflow needs bounded git context. Use `action: "commit"` only when you explicitly want a local git commit. CommitMe never pushes.
 
 ---
 
@@ -226,7 +227,7 @@ Allowed types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `build`, `ci`
 
 Summaries should be imperative, clear, specific, and must not end with a period.
 
-For command drafting and gather-tool prompts, CommitMe uses separate system and repository-context prompts where supported by pi, sizes the prompt to the active model when available, keeps the prompt bounded even for very large context-window local models, and asks for only the final subject line. If a model returns a verbose message with a body, CommitMe automatically extracts the first valid Conventional Commit subject and commits only that line. If a model returns empty text, thinking-only content, a length-stopped response, or an invalid subject, CommitMe retries or repairs once where safe and still refuses to commit without a validated subject.
+For command drafting, gather-tool prompts, and message-less `commitme action="commit"` drafting, CommitMe uses separate system and repository-context prompts where supported by pi, sizes the prompt to the active model when available, keeps the prompt bounded even for very large context-window local models, and asks for only the final subject line. If a model returns a verbose message with a body, CommitMe automatically extracts the first valid Conventional Commit subject and commits only that line. If a model returns empty text, thinking-only content, a length-stopped response, or an invalid subject, CommitMe retries or repairs once where safe and still refuses to commit without a validated subject.
 
 ---
 
@@ -235,7 +236,8 @@ For command drafting and gather-tool prompts, CommitMe uses separate system and 
 - CommitMe never runs `git push`.
 - CommitMe does not send telemetry.
 - CommitMe uses only local `git` commands and the active pi LLM provider.
-- `/commitme --confirm` requires a UI-capable pi mode.
+- `/commitme --confirm` and `commitme action="commit", confirm: true` require a UI-capable pi mode.
+- The `commitme` tool mutates git history locally only for `action: "commit"`; message-less commit mode drafts like `/commitme`, while explicit-message mode uses the provided final subject.
 - Commit actions abort before staging if known secret files, unreadable changed files, or high-confidence secret tokens would be committed.
 - `.env.*` files such as `.env.example`, `.env.local`, and `.env.production` are allowed by path; their contents are still redacted for model context and scanned for high-confidence secret tokens before staging.
 - Large, generated, binary-looking, unreadable, symlinked, and symlink-aliased changed-file contents are omitted from model context, but CommitMe still scans regular changed files locally to detect high-confidence secret tokens before staging.

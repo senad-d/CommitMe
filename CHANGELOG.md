@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added message-less `commitme action="commit"` tool parity with `/commitme`, including active-model drafting, optional confirmation, local commit creation, and terminating no-op/cancel/success results.
 - Refused unreadable changed files before staging so CommitMe does not auto-commit content it cannot scan for high-confidence secret tokens.
 - Escaped control characters in unsafe-path refusal messages to avoid malformed terminal output from unusual filenames.
 - Prevented changed paths reached through symlinked directories from reading content outside the repository into model context.

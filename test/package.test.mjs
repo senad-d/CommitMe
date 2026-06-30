@@ -68,12 +68,14 @@ test("packaged documentation avoids machine-local preparation paths", async () =
   assert.doesNotMatch(brief, /\/Users\/|Documents\/Code|Moj_git|pi-tmp/);
 });
 
-test("extension entry point delegates to command and tool registration modules", async () => {
+test("extension entry point delegates to command and the single commitme tool registration modules", async () => {
   const extension = await readProjectFile("src/extension.ts");
+  const source = await readSourceTree();
 
   assert.match(extension, /commitMeExtension/);
   assert.match(extension, /registerCommitMeCommand\(pi\)/);
   assert.match(extension, /registerCommitMeTool\(pi\)/);
+  assert.doesNotMatch(source, /COMMIT_TOOL_NAME|commit-tool|registerCommitTool/);
 });
 
 test("implementation avoids background resources and custom widgets", async () => {

@@ -1,6 +1,6 @@
 # CommitMe Structure Guide
 
-CommitMe is a TypeScript Pi extension package that registers one slash command and one tool for Conventional Commit subject-line workflows.
+CommitMe is a TypeScript Pi extension package that registers one slash command and one `commitme` tool for Conventional Commit subject-line workflows, including gather, explicit-message commit, and message-less draft-and-commit tool paths.
 
 ## Current layout
 
@@ -11,9 +11,11 @@ src/
 ├── types.ts                      # serializable domain types
 ├── commitme-details.ts           # shared tool/command result details helpers
 ├── commands/
-│   └── commitme-command.ts       # /commitme argument parsing and command flow
+│   └── commitme-command.ts       # /commitme argument parsing, help, and UI notifications
 ├── tools/
-│   └── commitme-tool.ts          # commitme TypeBox tool schema and execution
+│   └── commitme-tool.ts          # commitme TypeBox tool schema and gather/commit execution
+├── workflows/
+│   └── commitme-commit-flow.ts   # shared draft-and-create-commit orchestration
 ├── model/
 │   └── draft-commit-message.ts   # active-model drafting, response diagnostics, retry, and repair
 ├── git/
@@ -28,14 +30,15 @@ src/
 ## Module boundaries
 
 1. `src/extension.ts` imports registration functions and calls them only.
-2. `src/commands/commitme-command.ts` parses flags and optional steering text, serves `/commitme help`, gathers context, validates drafts, asks for confirmation when requested, and commits.
-3. `src/tools/commitme-tool.ts` exposes gather/commit behavior to the agent with structured `details`, including optional gather-time steering guidance.
-4. `src/model/draft-commit-message.ts` calls the active Pi model with system/user prompt parts, inspects response shape, retries empty/thinking-only/length-stopped drafts, repairs invalid drafts when safe, and returns only validated one-line subjects.
-5. `src/git/context.ts` reads git status/diff data, project metadata, safe file snippets, symlink-safe omission reasons, and abort-aware local secret scans for changed files.
-6. `src/git/commit.ts` validates and normalizes Lightweight Conventional Commit subjects, stages the gathered changed paths, and commits with `git commit`.
-7. `src/prompt/build-commit-prompt.ts` formats weak-model-friendly prompt sections, includes bounded user steering guidance, independently budgets sections by priority, bounds final prompt size, and preserves the final output reminder when truncation is needed.
-8. `src/commitme-details.ts` keeps command and tool result metadata consistent.
-9. `src/utils/truncation.ts` enforces output limits and emits truncation metadata/notices.
+2. `src/commands/commitme-command.ts` parses flags and optional steering text, serves `/commitme help`, waits for idle, delegates draft-and-commit work, and reports UI notifications/messages.
+3. `src/tools/commitme-tool.ts` exposes gather behavior, explicit-message commit behavior, and message-less `/commitme` parity commit behavior to the agent with structured `details`.
+4. `src/workflows/commitme-commit-flow.ts` gathers context, refuses unsafe files, builds bounded prompts, drafts and validates subjects, optionally confirms, and creates local commits without UI-specific side effects.
+5. `src/model/draft-commit-message.ts` calls the active Pi model with system/user prompt parts, inspects response shape, retries empty/thinking-only/length-stopped drafts, repairs invalid drafts when safe, and returns only validated one-line subjects plus safe diagnostics where requested.
+6. `src/git/context.ts` reads git status/diff data, project metadata, safe file snippets, symlink-safe omission reasons, and abort-aware local secret scans for changed files.
+7. `src/git/commit.ts` validates and normalizes Lightweight Conventional Commit subjects, stages the gathered changed paths, and commits with `git commit`.
+8. `src/prompt/build-commit-prompt.ts` formats weak-model-friendly prompt sections, includes bounded user steering guidance, independently budgets sections by priority, bounds final prompt size, and preserves the final output reminder when truncation is needed.
+9. `src/commitme-details.ts` keeps command and tool result metadata consistent.
+10. `src/utils/truncation.ts` enforces output limits and emits truncation metadata/notices.
 
 ## Pi extension conventions
 
@@ -49,7 +52,7 @@ src/
 ## Security-sensitive areas
 
 - Local git shell execution uses `pi.exec("git", args)` with argument arrays.
-- Tool gather mode is read-only; `/commitme` is an explicit commit command.
+- Tool gather mode is read-only; `/commitme` and message-less `commitme action="commit"` are explicit draft-and-commit paths; explicit-message `commitme action="commit"` uses a provided final subject.
 - Model drafting retries and repairs happen before confirmation, staging, or committing, and diagnostics avoid raw prompt/diff/model-output content.
 - Commit mode is explicit and stages only gathered changed paths before `git commit`.
 - Optional confirmation runs only when requested.

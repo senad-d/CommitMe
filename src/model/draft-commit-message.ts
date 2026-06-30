@@ -1,5 +1,5 @@
 import { complete, type AssistantMessage } from "@earendil-works/pi-ai";
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import {
   DEFAULT_DRAFT_MAX_TOKENS,
@@ -11,7 +11,26 @@ import { extractCommitMessage, validateCommitMessage } from "../git/commit.ts";
 import type { CommitPromptPayload, DraftAttemptDiagnostics, DraftResponseDiagnostics, DraftUsageDiagnostics } from "../types.ts";
 import { appendTruncationNotice, truncateText } from "../utils/truncation.ts";
 
-export type DraftCommitMessage = (prompt: string, ctx: ExtensionCommandContext, payload?: CommitPromptPayload) => Promise<string>;
+export type DraftCommitMessageContext = Pick<ExtensionContext, "model" | "modelRegistry" | "signal">;
+
+export interface DraftCommitMessageResult {
+  message: string;
+  attempts: DraftAttemptDiagnostics[];
+}
+
+export type DraftCommitMessage = (prompt: string, ctx: DraftCommitMessageContext, payload?: CommitPromptPayload) => Promise<string>;
+
+export type DraftCommitMessageWithDiagnostics = (
+  prompt: string,
+  ctx: DraftCommitMessageContext,
+  payload?: CommitPromptPayload,
+) => Promise<DraftCommitMessageResult>;
+
+export type DraftCommitMessageDependency = (
+  prompt: string,
+  ctx: DraftCommitMessageContext,
+  payload?: CommitPromptPayload,
+) => Promise<string | DraftCommitMessageResult>;
 
 export class CommitMeDraftError extends Error {
   readonly code: "model-error" | "empty-draft" | "invalid-draft";
@@ -167,7 +186,7 @@ function fallbackPromptPayload(prompt: string): CommitPromptPayload {
 }
 
 async function completePrompt(
-  ctx: ExtensionCommandContext,
+  ctx: DraftCommitMessageContext,
   auth: { apiKey: string; headers?: Record<string, string> },
   payload: CommitPromptPayload,
   userPrompt: string,
@@ -271,7 +290,7 @@ function validateDraftText(text: string): { ok: true; message: string } | { ok: 
 }
 
 async function completeAndValidate(
-  ctx: ExtensionCommandContext,
+  ctx: DraftCommitMessageContext,
   auth: { apiKey: string; headers?: Record<string, string> },
   payload: CommitPromptPayload,
   userPrompt: string,
@@ -299,7 +318,7 @@ async function completeAndValidate(
   return { ok: false, responseText, diagnostics, validationError: validation.error };
 }
 
-export const draftCommitMessageWithActiveModel: DraftCommitMessage = async (prompt, ctx, promptPayload) => {
+export const draftCommitMessageWithActiveModelDiagnostics: DraftCommitMessageWithDiagnostics = async (prompt, ctx, promptPayload) => {
   if (!ctx.model) {
     throw new Error("No active Pi model is selected for CommitMe drafting.");
   }
@@ -324,7 +343,7 @@ export const draftCommitMessageWithActiveModel: DraftCommitMessage = async (prom
   attempts.push(initialAttempt);
 
   const initial = await completeAndValidate(ctx, auth, payload, payload.userPrompt, initialAttempt, attempts);
-  if (initial.ok) return initial.message;
+  if (initial.ok) return { message: initial.message, attempts };
 
   const shouldRetry = shouldRetryDraftResponse(initial.diagnostics, false);
   let latestFailure = initial;
@@ -338,7 +357,7 @@ export const draftCommitMessageWithActiveModel: DraftCommitMessage = async (prom
       };
       attempts.push(retryAttempt);
       const retry = await completeAndValidate(ctx, auth, payload, buildRetryPrompt(payload, initial.diagnostics), retryAttempt, attempts);
-      if (retry.ok) return retry.message;
+      if (retry.ok) return { message: retry.message, attempts };
       latestFailure = retry;
       if (retry.diagnostics.empty) throw createEmptyDraftError(attempts);
     }
@@ -359,11 +378,16 @@ export const draftCommitMessageWithActiveModel: DraftCommitMessage = async (prom
       repairAttempt,
       attempts,
     );
-    if (repaired.ok) return repaired.message;
+    if (repaired.ok) return { message: repaired.message, attempts };
     latestFailure = repaired;
     if (repaired.diagnostics.empty) throw createEmptyDraftError(attempts);
   }
 
   if (latestFailure.diagnostics.empty) throw createEmptyDraftError(attempts);
   throw createInvalidDraftError(attempts);
+};
+
+export const draftCommitMessageWithActiveModel: DraftCommitMessage = async (prompt, ctx, promptPayload) => {
+  const result = await draftCommitMessageWithActiveModelDiagnostics(prompt, ctx, promptPayload);
+  return result.message;
 };

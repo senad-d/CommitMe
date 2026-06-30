@@ -1,12 +1,9 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
-import { collectGitContextTruncation, createCommitMeDetails } from "../commitme-details.ts";
 import { COMMITME_COMMAND_NAME, EXTENSION_DISPLAY_NAME } from "../constants.ts";
-import { assertNoUnsafeCommitFiles, createCommit, validateCommitMessage } from "../git/commit.ts";
-import { gatherGitContext } from "../git/context.ts";
-import { draftCommitMessageWithActiveModel, type DraftCommitMessage } from "../model/draft-commit-message.ts";
-import { buildBoundedCommitPrompt } from "../prompt/build-commit-prompt.ts";
+import type { DraftCommitMessageDependency } from "../model/draft-commit-message.ts";
 import type { CommitMeParseResult, CommitMeToolDetails } from "../types.ts";
+import { draftAndCreateCommit } from "../workflows/commitme-commit-flow.ts";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
 const HELP_COMMAND = "help";
@@ -14,7 +11,7 @@ const HELP_COMMAND = "help";
 export type { DraftCommitMessage } from "../model/draft-commit-message.ts";
 
 export interface RegisterCommitMeCommandOptions {
-  draftCommitMessage?: DraftCommitMessage;
+  draftCommitMessage?: DraftCommitMessageDependency;
 }
 
 interface CommitMeArgToken {
@@ -199,8 +196,6 @@ async function confirmCommitIfNeeded(ctx: ExtensionCommandContext, message: stri
 }
 
 export function registerCommitMeCommand(pi: ExtensionAPI, options: RegisterCommitMeCommandOptions = {}) {
-  const draftCommitMessage = options.draftCommitMessage ?? draftCommitMessageWithActiveModel;
-
   pi.registerCommand(COMMITME_COMMAND_NAME, {
     description: "Create a Conventional Commit from staged and unstaged git changes",
     handler: async (args, ctx) => {
@@ -224,46 +219,26 @@ export function registerCommitMeCommand(pi: ExtensionAPI, options: RegisterCommi
         await ctx.waitForIdle();
       }
 
-      const gitContext = await gatherGitContext(pi, { cwd: ctx.cwd, signal: ctx.signal });
-      if (!gitContext.hasChanges) {
+      const result = await draftAndCreateCommit(pi, {
+        cwd: ctx.cwd,
+        signal: ctx.signal,
+        steeringPrompt: parsed.options.steeringPrompt,
+        draftContext: ctx,
+        ...(options.draftCommitMessage ? { draftCommitMessage: options.draftCommitMessage } : {}),
+        confirmCommit: (subject) => confirmCommitIfNeeded(ctx, subject, parsed.options.confirm),
+      });
+
+      if (result.status === "no-changes") {
         ctx.ui.notify(`${EXTENSION_DISPLAY_NAME}: no staged or unstaged git changes found.`, "warning");
         return;
       }
-      assertNoUnsafeCommitFiles(gitContext.changedFiles);
 
-      const prompt = buildBoundedCommitPrompt(gitContext, {
-        steeringPrompt: parsed.options.steeringPrompt,
-        modelContextWindow: ctx.model?.contextWindow,
-        modelMaxTokens: ctx.model?.maxTokens,
-      });
-      const draft = await draftCommitMessage(prompt.text, ctx, prompt);
-      const validation = validateCommitMessage(draft);
-      if (!validation.ok) {
-        throw new Error(`CommitMe received an invalid commit message draft: ${validation.error} CommitMe did not stage or commit.`);
-      }
-      const details = createCommitMeDetails("gather", gitContext, {
-        ...(parsed.options.steeringPrompt ? { steeringPrompt: parsed.options.steeringPrompt } : {}),
-        truncation: [...collectGitContextTruncation(gitContext), ...prompt.truncation],
-        prompt: prompt.diagnostics,
-      });
-
-      const confirmed = await confirmCommitIfNeeded(ctx, validation.subject, parsed.options.confirm);
-      if (!confirmed) {
+      if (result.status === "cancelled") {
         ctx.ui.notify(`${EXTENSION_DISPLAY_NAME}: commit cancelled.`, "info");
         return;
       }
 
-      const committed = await createCommit(pi, {
-        cwd: ctx.cwd,
-        signal: ctx.signal,
-        message: validation.subject,
-        expectedStatusPorcelain: gitContext.statusPorcelain,
-      });
-      sendCommitMeMessage(pi, `Committed ${committed.commitHash}: ${committed.subject}`, {
-        ...details,
-        action: "commit",
-        committed,
-      });
+      sendCommitMeMessage(pi, `Committed ${result.committed.commitHash}: ${result.committed.subject}`, result.details);
     },
   });
 }
