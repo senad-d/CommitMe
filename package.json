@@ -1,6 +1,6 @@
 {
   "name": "@senad-d/commitme",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
   "description": "Pi extension that gathers git diff and project context to draft or create clear Conventional Commit messages.",
   "license": "MIT",
