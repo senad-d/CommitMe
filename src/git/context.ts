@@ -91,7 +91,7 @@ const BINARY_PATH_EXTENSIONS = new Set([
 ]);
 const HIGH_CONFIDENCE_SECRET_PATTERNS = [
   { name: "private key", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/g },
-  { name: "bearer token", pattern: /Authorization:\s*Bearer\s+[-A-Za-z0-9._~+/=]{20,}/gi },
+  { name: "bearer token", pattern: /Authorization:\s*Bearer\s+[-A-Z0-9._~+/=]{20,}/gi },
   { name: "AWS access key", pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g },
   { name: "GitHub token", pattern: /\b(?:ghp|gho|ghu|ghs|ghr)_\w{36,}\b/g },
   { name: "GitHub fine-grained token", pattern: /\bgithub_pat_\w{20,}\b/g },
