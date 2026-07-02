@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { appendFile, chmod, mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -18,6 +18,8 @@ import {
 } from "../src/git/context.ts";
 
 const execFileAsync = promisify(execFile);
+const BEARER_TOKEN_FIXTURE = ["abc.DEF_123~+/=", "ghiJKLmnop"].join("");
+const PRIVATE_KEY_HEADER_FIXTURE = ["-----BEGIN RSA ", "PRIVATE KEY-----"].join("");
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), "commitme-context-"));
@@ -159,7 +161,7 @@ test("parseStatusPorcelainZ handles copy records", () => {
 
 test("looksHighConfidenceSecretContent covers token families and ignores placeholders", () => {
   const samples = [
-    `bearer: Authorization: Bearer abc.DEF_123~+/=-ghiJKLmnop`,
+    `bearer: Authorization: Bearer ${BEARER_TOKEN_FIXTURE}`,
     `aws: AKIA${"A".repeat(16)}`,
     `github: ghp_${"A".repeat(36)}`,
     `github fine-grained: github_pat_${"A".repeat(20)}`,
@@ -168,11 +170,17 @@ test("looksHighConfidenceSecretContent covers token families and ignores placeho
     `anthropic: sk-ant-${"A".repeat(24)}`,
     `slack: xoxb-${"1".repeat(20)}`,
     `jwt: eyJ${"A".repeat(10)}.${"B".repeat(10)}.${"C".repeat(10)}`,
-    "-----BEGIN RSA PRIVATE KEY-----",
+    PRIVATE_KEY_HEADER_FIXTURE,
   ];
 
   assert.ok(samples.every((sample) => looksHighConfidenceSecretContent(sample)));
   assert.equal(looksHighConfidenceSecretContent(`github: ghp_${"example".padEnd(36, "x")}`), false);
+});
+
+test("context scanner tests avoid literal high-confidence secret fixtures", async () => {
+  const source = await readFile(new URL(import.meta.url), "utf8");
+
+  assert.equal(looksHighConfidenceSecretContent(source), false);
 });
 
 test("gatherGitContext captures staged-only changes", async () => {
