@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
+import { CONVENTIONAL_COMMIT_TYPES } from "../src/constants.ts";
 import {
   assertNoUnsafeCommitFiles,
   CommitMeCommitError,
@@ -88,6 +89,15 @@ test("validateCommitMessage accepts valid subject-only Conventional Commits", ()
   assert.equal(result.ok, true);
   assert.equal(result.subject, "feat(cli): add commit drafting");
   assert.equal(result.body, "");
+});
+
+test("validateCommitMessage accepts every configured Conventional Commit type", () => {
+  for (const type of CONVENTIONAL_COMMIT_TYPES) {
+    const result = validateCommitMessage(`${type}: verify configured type`);
+
+    assert.equal(result.ok, true, `${type} should validate`);
+    assert.equal(result.subject, `${type}: verify configured type`);
+  }
 });
 
 test("validateCommitMessage normalizes verbose model output to the subject only", () => {

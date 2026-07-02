@@ -1,8 +1,8 @@
 function escapedControlCharacter(character: string, codePoint: number): string {
-  if (character === "\r") return "\\r";
-  if (character === "\n") return "\\n";
-  if (character === "\t") return "\\t";
-  return `\\x${codePoint.toString(16).padStart(2, "0")}`;
+  if (character === "\r") return String.raw`\r`;
+  if (character === "\n") return String.raw`\n`;
+  if (character === "\t") return String.raw`\t`;
+  return String.raw`\x${codePoint.toString(16).padStart(2, "0")}`;
 }
 
 export function formatDisplayPath(path: string): string {

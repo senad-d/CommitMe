@@ -1,4 +1,4 @@
-import { DEFAULT_COMMIT_TIMEOUT_MS, CONVENTIONAL_COMMIT_TYPES } from "../constants.ts";
+import { DEFAULT_COMMIT_TIMEOUT_MS } from "../constants.ts";
 import type {
   ChangedFile,
   CommitMeExecOptions,
@@ -10,17 +10,13 @@ import type {
 import { formatDisplayPath } from "../utils/display-path.ts";
 import { gatherGitContext, isKnownSecretPath, runGit, STATUS_PORCELAIN_ARGS } from "./context.ts";
 
-const COMMIT_TYPE_PATTERN = CONVENTIONAL_COMMIT_TYPES.join("|");
-const CONVENTIONAL_SUBJECT_RE = new RegExp(String.raw`^(${COMMIT_TYPE_PATTERN})(\([A-Za-z0-9._/-]+\))?!?: (?<summary>[^\s].*)$`);
+const CONVENTIONAL_SUBJECT_RE = /^(feat|fix|refactor|docs|test|chore|build|ci|perf|style|revert)(\([A-Za-z0-9._/-]+\))?!?: (?<summary>[^\s].*)$/;
 const MARKDOWN_FENCE_LANGUAGE_RE = /^[A-Za-z0-9_-]+$/u;
-const MATCHING_QUOTES_RE = new RegExp(String.raw`^(["'])([\s\S]*)\1$`);
-const SIMPLE_PREFIX_RE = new RegExp(
-  String.raw`^(?:final\s+answer|final\s+commit\s+message|commit\s+message|message|subject):\s*`,
-  "i",
-);
-const HERE_IS_PREFIX_RE = new RegExp(String.raw`^here(?:'s|\s+is)\s+(?:the\s+)?(?:final\s+)?(?:commit\s+message|message):\s*`, "i");
-const LIST_BULLET_RE = new RegExp(String.raw`^[-*]\s+`);
-const LIST_NUMBER_RE = new RegExp(String.raw`^\d+[.)]\s+`);
+const MATCHING_QUOTES_RE = /^(["'])([\s\S]*)\1$/;
+const SIMPLE_PREFIX_RE = /^(?:final\s+answer|final\s+commit\s+message|commit\s+message|message|subject):\s*/i;
+const HERE_IS_PREFIX_RE = /^here(?:'s|\s+is)\s+(?:the\s+)?(?:final\s+)?(?:commit\s+message|message):\s*/i;
+const LIST_BULLET_RE = /^[-*]\s+/;
+const LIST_NUMBER_RE = /^\d+[.)]\s+/;
 
 export class CommitMeCommitError extends Error {
   readonly code: string;

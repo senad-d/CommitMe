@@ -159,10 +159,13 @@ test("parseStatusPorcelainZ handles copy records", () => {
 
 test("looksHighConfidenceSecretContent covers token families and ignores placeholders", () => {
   const samples = [
+    `bearer: Authorization: Bearer abc.DEF_123~+/=-ghiJKLmnop`,
     `aws: AKIA${"A".repeat(16)}`,
     `github: ghp_${"A".repeat(36)}`,
+    `github fine-grained: github_pat_${"A".repeat(20)}`,
     `gitlab: glpat-${"A".repeat(20)}`,
     `openai: sk-${"A".repeat(24)}`,
+    `anthropic: sk-ant-${"A".repeat(24)}`,
     `slack: xoxb-${"1".repeat(20)}`,
     `jwt: eyJ${"A".repeat(10)}.${"B".repeat(10)}.${"C".repeat(10)}`,
     "-----BEGIN RSA PRIVATE KEY-----",

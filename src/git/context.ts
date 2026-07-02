@@ -90,15 +90,15 @@ const BINARY_PATH_EXTENSIONS = new Set([
   ".bin",
 ]);
 const HIGH_CONFIDENCE_SECRET_PATTERNS = [
-  { name: "private key", pattern: new RegExp(String.raw`-----BEGIN [A-Z ]*PRIVATE KEY-----`, "g") },
-  { name: "bearer token", pattern: new RegExp(String.raw`Authorization:\s*Bearer\s+[A-Za-z0-9._~+/=-]{20,}`, "gi") },
-  { name: "AWS access key", pattern: new RegExp(String.raw`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`, "g") },
-  { name: "GitHub token", pattern: new RegExp(String.raw`\b(?:ghp|gho|ghu|ghs|ghr)_\w{36,}\b`, "g") },
-  { name: "GitHub fine-grained token", pattern: new RegExp(String.raw`\bgithub_pat_\w{20,}\b`, "g") },
-  { name: "GitLab token", pattern: new RegExp(String.raw`\bglpat-[A-Za-z0-9_-]{20,}\b`, "g") },
-  { name: "OpenAI token", pattern: new RegExp(String.raw`\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b`, "g") },
-  { name: "Slack token", pattern: new RegExp(String.raw`\bxox[barps]-[A-Za-z0-9-]{20,}\b`, "g") },
-  { name: "JWT", pattern: new RegExp(String.raw`\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`, "g") },
+  { name: "private key", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/g },
+  { name: "bearer token", pattern: /Authorization:\s*Bearer\s+[-A-Za-z0-9._~+/=]{20,}/gi },
+  { name: "AWS access key", pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g },
+  { name: "GitHub token", pattern: /\b(?:ghp|gho|ghu|ghs|ghr)_\w{36,}\b/g },
+  { name: "GitHub fine-grained token", pattern: /\bgithub_pat_\w{20,}\b/g },
+  { name: "GitLab token", pattern: /\bglpat-[A-Za-z0-9_-]{20,}\b/g },
+  { name: "OpenAI token", pattern: /\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b/g },
+  { name: "Slack token", pattern: /\bxox[barps]-[A-Za-z0-9-]{20,}\b/g },
+  { name: "JWT", pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g },
 ];
 
 export class GitCommandError extends Error {
