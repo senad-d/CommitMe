@@ -233,10 +233,11 @@ function buildRetryPrompt(payload: CommitPromptPayload, diagnostics: DraftRespon
     diagnostics.thinkingOnly ? "only thinking/reasoning content" : "",
     diagnostics.lengthStopped ? "output length exhausted" : "",
   ].filter(Boolean);
+  const reasonSuffix = reasons.length > 0 ? ` (${reasons.join(", ")})` : "";
 
   return [
     "The previous response did not produce a usable final commit subject line.",
-    `Safe response diagnostics: ${formatDraftResponseDiagnostics(diagnostics)}${reasons.length > 0 ? ` (${reasons.join(", ")})` : ""}.`,
+    `Safe response diagnostics: ${formatDraftResponseDiagnostics(diagnostics)}${reasonSuffix}.`,
     "Retry once. Do not include reasoning, markdown, body, footer, bullets, headings, labels, alternatives, or explanations.",
     "Return exactly one valid Lightweight Conventional Commit subject line and never return empty.",
     "",
@@ -283,6 +284,14 @@ function createInvalidDraftError(attempts: DraftAttemptDiagnostics[]): CommitMeD
   );
 }
 
+type DraftAuth = { apiKey: string; headers?: Record<string, string> };
+
+type DraftValidationSuccess = { ok: true; message: string; responseText: string };
+
+type DraftValidationFailure = { ok: false; responseText: string; diagnostics: DraftResponseDiagnostics; validationError?: string };
+
+type DraftValidationResult = DraftValidationSuccess | DraftValidationFailure;
+
 function validateDraftText(text: string): { ok: true; message: string } | { ok: false; error: string } {
   const validation = validateCommitMessage(text);
   if (!validation.ok) return { ok: false, error: validation.error };
@@ -291,12 +300,12 @@ function validateDraftText(text: string): { ok: true; message: string } | { ok: 
 
 async function completeAndValidate(
   ctx: DraftCommitMessageContext,
-  auth: { apiKey: string; headers?: Record<string, string> },
+  auth: DraftAuth,
   payload: CommitPromptPayload,
   userPrompt: string,
   attempt: DraftAttemptDiagnostics,
   attempts: DraftAttemptDiagnostics[],
-): Promise<{ ok: true; message: string; responseText: string } | { ok: false; responseText: string; diagnostics: DraftResponseDiagnostics; validationError?: string }> {
+): Promise<DraftValidationResult> {
   const response = await completePrompt(ctx, auth, payload, userPrompt, attempt.maxTokens);
   const diagnostics = inspectAssistantResponse(response);
   attempt.response = diagnostics;
@@ -318,7 +327,7 @@ async function completeAndValidate(
   return { ok: false, responseText, diagnostics, validationError: validation.error };
 }
 
-export const draftCommitMessageWithActiveModelDiagnostics: DraftCommitMessageWithDiagnostics = async (prompt, ctx, promptPayload) => {
+async function resolveDraftAuth(ctx: DraftCommitMessageContext): Promise<DraftAuth> {
   if (!ctx.model) {
     throw new Error("No active Pi model is selected for CommitMe drafting.");
   }
@@ -330,61 +339,120 @@ export const draftCommitMessageWithActiveModelDiagnostics: DraftCommitMessageWit
   if (!authResult.apiKey) {
     throw new Error(`No API key is available for ${ctx.model.provider}/${ctx.model.id}.`);
   }
+  return { apiKey: authResult.apiKey, headers: authResult.headers };
+}
 
-  const auth = { apiKey: authResult.apiKey, headers: authResult.headers };
+function createDraftAttempt(
+  attempts: DraftAttemptDiagnostics[],
+  purpose: DraftAttemptDiagnostics["purpose"],
+  maxTokens: number,
+): DraftAttemptDiagnostics {
+  const attempt: DraftAttemptDiagnostics = {
+    attempt: attempts.length + 1,
+    purpose,
+    maxTokens,
+  };
+  attempts.push(attempt);
+  return attempt;
+}
+
+async function executeInitialDraft(
+  ctx: DraftCommitMessageContext,
+  auth: DraftAuth,
+  payload: CommitPromptPayload,
+  attempts: DraftAttemptDiagnostics[],
+): Promise<DraftValidationResult> {
+  const attempt = createDraftAttempt(attempts, "draft", selectDraftMaxTokens(ctx.model, DEFAULT_DRAFT_MAX_TOKENS));
+  return completeAndValidate(ctx, auth, payload, payload.userPrompt, attempt, attempts);
+}
+
+async function executeRetryDraft(
+  ctx: DraftCommitMessageContext,
+  auth: DraftAuth,
+  payload: CommitPromptPayload,
+  initialDiagnostics: DraftResponseDiagnostics,
+  initialMaxTokens: number,
+  attempts: DraftAttemptDiagnostics[],
+): Promise<DraftValidationResult> {
+  const attempt = createDraftAttempt(attempts, "retry", selectRetryDraftMaxTokens(ctx.model, initialMaxTokens));
+  return completeAndValidate(ctx, auth, payload, buildRetryPrompt(payload, initialDiagnostics), attempt, attempts);
+}
+
+async function executeRetryDrafts(
+  ctx: DraftCommitMessageContext,
+  auth: DraftAuth,
+  payload: CommitPromptPayload,
+  initialFailure: DraftValidationFailure,
+  attempts: DraftAttemptDiagnostics[],
+): Promise<DraftValidationResult> {
+  if (!shouldRetryDraftResponse(initialFailure.diagnostics, false)) return initialFailure;
+
+  let latestFailure: DraftValidationFailure = initialFailure;
+  const initialMaxTokens = attempts[0]?.maxTokens ?? DEFAULT_DRAFT_MAX_TOKENS;
+  for (let retryIndex = 0; retryIndex < DRAFT_RETRY_MAX_ATTEMPTS; retryIndex += 1) {
+    const retry = await executeRetryDraft(ctx, auth, payload, initialFailure.diagnostics, initialMaxTokens, attempts);
+    if (retry.ok) return retry;
+    latestFailure = retry;
+    if (retry.diagnostics.empty) throw createEmptyDraftError(attempts);
+  }
+  return latestFailure;
+}
+
+function shouldAttemptRepair(failure: DraftValidationFailure): failure is DraftValidationFailure & { validationError: string } {
+  return failure.responseText.trim().length > 0 && Boolean(failure.validationError);
+}
+
+async function executeRepairDraft(
+  ctx: DraftCommitMessageContext,
+  auth: DraftAuth,
+  payload: CommitPromptPayload,
+  failure: DraftValidationFailure & { validationError: string },
+  attempts: DraftAttemptDiagnostics[],
+): Promise<DraftValidationResult> {
+  const attempt = createDraftAttempt(attempts, "repair", selectDraftMaxTokens(ctx.model, DRAFT_REPAIR_MAX_TOKENS));
+  const repairPrompt = buildRepairPrompt(payload, failure.responseText, failure.validationError);
+  return completeAndValidate(ctx, auth, payload, repairPrompt, attempt, attempts);
+}
+
+async function executeRepairDraftIfNeeded(
+  ctx: DraftCommitMessageContext,
+  auth: DraftAuth,
+  payload: CommitPromptPayload,
+  latestFailure: DraftValidationFailure,
+  attempts: DraftAttemptDiagnostics[],
+): Promise<DraftValidationResult> {
+  if (!shouldAttemptRepair(latestFailure)) return latestFailure;
+
+  const repaired = await executeRepairDraft(ctx, auth, payload, latestFailure, attempts);
+  if (repaired.ok) return repaired;
+  if (repaired.diagnostics.empty) throw createEmptyDraftError(attempts);
+  return repaired;
+}
+
+function throwLatestDraftFailure(latestFailure: DraftValidationFailure, attempts: DraftAttemptDiagnostics[]): never {
+  if (latestFailure.diagnostics.empty) throw createEmptyDraftError(attempts);
+  throw createInvalidDraftError(attempts);
+}
+
+export const draftCommitMessageWithActiveModelDiagnostics: DraftCommitMessageWithDiagnostics = async (prompt, ctx, promptPayload) => {
+  if (!ctx.model) {
+    throw new Error("No active Pi model is selected for CommitMe drafting.");
+  }
+
+  const auth = await resolveDraftAuth(ctx);
   const payload = promptPayload ?? fallbackPromptPayload(prompt);
   const attempts: DraftAttemptDiagnostics[] = [];
 
-  const initialAttempt: DraftAttemptDiagnostics = {
-    attempt: 1,
-    purpose: "draft",
-    maxTokens: selectDraftMaxTokens(ctx.model, DEFAULT_DRAFT_MAX_TOKENS),
-  };
-  attempts.push(initialAttempt);
-
-  const initial = await completeAndValidate(ctx, auth, payload, payload.userPrompt, initialAttempt, attempts);
+  const initial = await executeInitialDraft(ctx, auth, payload, attempts);
   if (initial.ok) return { message: initial.message, attempts };
 
-  const shouldRetry = shouldRetryDraftResponse(initial.diagnostics, false);
-  let latestFailure = initial;
+  const retried = await executeRetryDrafts(ctx, auth, payload, initial, attempts);
+  if (retried.ok) return { message: retried.message, attempts };
 
-  if (shouldRetry) {
-    for (let retryIndex = 0; retryIndex < DRAFT_RETRY_MAX_ATTEMPTS; retryIndex += 1) {
-      const retryAttempt: DraftAttemptDiagnostics = {
-        attempt: attempts.length + 1,
-        purpose: "retry",
-        maxTokens: selectRetryDraftMaxTokens(ctx.model, initialAttempt.maxTokens),
-      };
-      attempts.push(retryAttempt);
-      const retry = await completeAndValidate(ctx, auth, payload, buildRetryPrompt(payload, initial.diagnostics), retryAttempt, attempts);
-      if (retry.ok) return { message: retry.message, attempts };
-      latestFailure = retry;
-      if (retry.diagnostics.empty) throw createEmptyDraftError(attempts);
-    }
-  }
+  const repaired = await executeRepairDraftIfNeeded(ctx, auth, payload, retried, attempts);
+  if (repaired.ok) return { message: repaired.message, attempts };
 
-  if (latestFailure.responseText.trim().length > 0 && latestFailure.validationError) {
-    const repairAttempt: DraftAttemptDiagnostics = {
-      attempt: attempts.length + 1,
-      purpose: "repair",
-      maxTokens: selectDraftMaxTokens(ctx.model, DRAFT_REPAIR_MAX_TOKENS),
-    };
-    attempts.push(repairAttempt);
-    const repaired = await completeAndValidate(
-      ctx,
-      auth,
-      payload,
-      buildRepairPrompt(payload, latestFailure.responseText, latestFailure.validationError),
-      repairAttempt,
-      attempts,
-    );
-    if (repaired.ok) return { message: repaired.message, attempts };
-    latestFailure = repaired;
-    if (repaired.diagnostics.empty) throw createEmptyDraftError(attempts);
-  }
-
-  if (latestFailure.diagnostics.empty) throw createEmptyDraftError(attempts);
-  throw createInvalidDraftError(attempts);
+  throwLatestDraftFailure(repaired, attempts);
 };
 
 export const draftCommitMessageWithActiveModel: DraftCommitMessage = async (prompt, ctx, promptPayload) => {

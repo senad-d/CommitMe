@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 
 import { COMMITME_COMMAND_NAME, EXTENSION_DISPLAY_NAME } from "../constants.ts";
 import type { DraftCommitMessageDependency } from "../model/draft-commit-message.ts";
-import type { CommitMeParseResult, CommitMeToolDetails } from "../types.ts";
+import type { CommitMeCommandOptions, CommitMeParseResult, CommitMeToolDetails } from "../types.ts";
 import { draftAndCreateCommit } from "../workflows/commitme-commit-flow.ts";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
@@ -42,75 +42,18 @@ function helpCommandWasRequested(tokens: CommitMeArgToken[]): boolean {
   return tokens.slice(1).every((token) => token.text.startsWith("-"));
 }
 
-export function parseCommitMeArgs(rawArgs: string): CommitMeParseResult {
-  const raw = rawArgs.trim();
-  const tokens = tokenizeCommitMeArgs(raw);
+function helpParseResult(rawArgs: string): CommitMeParseResult {
+  return {
+    ok: true,
+    options: {
+      mode: "help",
+      confirm: false,
+      rawArgs,
+    },
+  };
+}
 
-  if (helpCommandWasRequested(tokens)) {
-    return {
-      ok: true,
-      options: {
-        mode: "help",
-        confirm: false,
-        rawArgs,
-      },
-    };
-  }
-
-  let confirm = false;
-  let tokenIndex = 0;
-  while (tokenIndex < tokens.length) {
-    const token = tokens[tokenIndex];
-    if (!token) break;
-
-    if (token.text === "--") {
-      const steeringPrompt = raw.slice(token.end).trim();
-      return {
-        ok: true,
-        options: {
-          mode: "commit",
-          confirm,
-          rawArgs,
-          ...(steeringPrompt ? { steeringPrompt } : {}),
-        },
-      };
-    }
-
-    if (HELP_FLAGS.has(token.lowerText)) {
-      return {
-        ok: true,
-        options: {
-          mode: "help",
-          confirm: false,
-          rawArgs,
-        },
-      };
-    }
-
-    if (token.text === "--commit") {
-      tokenIndex += 1;
-      continue;
-    }
-
-    if (token.text === "--confirm") {
-      confirm = true;
-      tokenIndex += 1;
-      continue;
-    }
-
-    if (token.text.startsWith("-")) {
-      return {
-        ok: false,
-        error: `Unknown flag: ${token.text}`,
-        unknownFlags: [token.text],
-      };
-    }
-
-    break;
-  }
-
-  const steeringPrompt = tokenIndex < tokens.length ? raw.slice(tokens[tokenIndex]?.start ?? raw.length).trim() : "";
-
+function commitParseResult(rawArgs: string, confirm: boolean, steeringPrompt: string): CommitMeParseResult {
   return {
     ok: true,
     options: {
@@ -120,6 +63,66 @@ export function parseCommitMeArgs(rawArgs: string): CommitMeParseResult {
       ...(steeringPrompt ? { steeringPrompt } : {}),
     },
   };
+}
+
+function unknownFlagParseResult(token: CommitMeArgToken): CommitMeParseResult {
+  return {
+    ok: false,
+    error: `Unknown flag: ${token.text}`,
+    unknownFlags: [token.text],
+  };
+}
+
+function terminatingTokenParseResult(
+  raw: string,
+  rawArgs: string,
+  token: CommitMeArgToken,
+  confirm: boolean,
+): CommitMeParseResult | undefined {
+  if (token.text === "--") return commitParseResult(rawArgs, confirm, raw.slice(token.end).trim());
+  if (HELP_FLAGS.has(token.lowerText)) return helpParseResult(rawArgs);
+  if (token.text.startsWith("-") && token.text !== "--commit" && token.text !== "--confirm") return unknownFlagParseResult(token);
+  return undefined;
+}
+
+interface CommitOptionScanResult {
+  confirm: boolean;
+  tokenIndex: number;
+  result?: CommitMeParseResult;
+}
+
+function scanCommitOptionTokens(raw: string, rawArgs: string, tokens: CommitMeArgToken[]): CommitOptionScanResult {
+  let confirm = false;
+
+  for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex += 1) {
+    const token = tokens[tokenIndex];
+    if (!token) return { confirm, tokenIndex };
+
+    const result = terminatingTokenParseResult(raw, rawArgs, token, confirm);
+    if (result) return { confirm, tokenIndex, result };
+
+    if (token.text === "--confirm") {
+      confirm = true;
+      continue;
+    }
+    if (token.text !== "--commit") return { confirm, tokenIndex };
+  }
+
+  return { confirm, tokenIndex: tokens.length };
+}
+
+export function parseCommitMeArgs(rawArgs: string): CommitMeParseResult {
+  const raw = rawArgs.trim();
+  const tokens = tokenizeCommitMeArgs(raw);
+
+  if (helpCommandWasRequested(tokens)) return helpParseResult(rawArgs);
+
+  const scan = scanCommitOptionTokens(raw, rawArgs, tokens);
+  if (scan.result) return scan.result;
+
+  const steeringStart = tokens[scan.tokenIndex]?.start ?? raw.length;
+  const steeringPrompt = scan.tokenIndex < tokens.length ? raw.slice(steeringStart).trim() : "";
+  return commitParseResult(rawArgs, scan.confirm, steeringPrompt);
 }
 
 function sendCommitMeMessage(pi: ExtensionAPI, content: string, details: CommitMeToolDetails) {
@@ -187,6 +190,10 @@ function sendCommitMeHelp(pi: ExtensionAPI) {
   );
 }
 
+type CommitMeWorkflowOptions = Parameters<typeof draftAndCreateCommit>[1];
+
+type CommitMeWorkflowResult = Awaited<ReturnType<typeof draftAndCreateCommit>>;
+
 async function confirmCommitIfNeeded(ctx: ExtensionCommandContext, message: string, confirm: boolean): Promise<boolean> {
   if (!confirm) return true;
   if (!ctx.hasUI) {
@@ -195,50 +202,82 @@ async function confirmCommitIfNeeded(ctx: ExtensionCommandContext, message: stri
   return ctx.ui.confirm(`${EXTENSION_DISPLAY_NAME}: create commit?`, `Commit with this message?\n\n${message}`);
 }
 
+function notifyParseError(ctx: ExtensionCommandContext, parsed: Extract<CommitMeParseResult, { ok: false }>): void {
+  ctx.ui.notify(`${EXTENSION_DISPLAY_NAME}: ${parsed.error}`, "warning");
+}
+
+function handleHelpMode(pi: ExtensionAPI, parsedOptions: CommitMeCommandOptions): boolean {
+  if (parsedOptions.mode !== "help") return false;
+  sendCommitMeHelp(pi);
+  return true;
+}
+
+function requireCommandConfirmationUi(ctx: ExtensionCommandContext, confirm: boolean): void {
+  if (confirm && !ctx.hasUI) {
+    throw new Error(`${EXTENSION_DISPLAY_NAME}: --confirm requires a UI-capable Pi mode.`);
+  }
+}
+
+async function waitForIdleIfNeeded(ctx: ExtensionCommandContext): Promise<void> {
+  if (ctx.isIdle()) return;
+  ctx.ui.notify(`${EXTENSION_DISPLAY_NAME}: waiting for the current agent turn to finish...`, "info");
+  await ctx.waitForIdle();
+}
+
+function buildWorkflowOptions(
+  ctx: ExtensionCommandContext,
+  parsedOptions: CommitMeCommandOptions,
+  options: RegisterCommitMeCommandOptions,
+): CommitMeWorkflowOptions {
+  return {
+    cwd: ctx.cwd,
+    signal: ctx.signal,
+    steeringPrompt: parsedOptions.steeringPrompt,
+    draftContext: ctx,
+    ...(options.draftCommitMessage ? { draftCommitMessage: options.draftCommitMessage } : {}),
+    confirmCommit: (subject) => confirmCommitIfNeeded(ctx, subject, parsedOptions.confirm),
+  };
+}
+
+function handleWorkflowResult(pi: ExtensionAPI, ctx: ExtensionCommandContext, result: CommitMeWorkflowResult): void {
+  if (result.status === "no-changes") {
+    ctx.ui.notify(`${EXTENSION_DISPLAY_NAME}: no staged or unstaged git changes found.`, "warning");
+    return;
+  }
+
+  if (result.status === "cancelled") {
+    ctx.ui.notify(`${EXTENSION_DISPLAY_NAME}: commit cancelled.`, "info");
+    return;
+  }
+
+  sendCommitMeMessage(pi, `Committed ${result.committed.commitHash}: ${result.committed.subject}`, result.details);
+}
+
+async function handleCommitMeCommand(
+  pi: ExtensionAPI,
+  options: RegisterCommitMeCommandOptions,
+  args: string,
+  ctx: ExtensionCommandContext,
+): Promise<void> {
+  const parsed = parseCommitMeArgs(args);
+  if (!parsed.ok) {
+    notifyParseError(ctx, parsed);
+    return;
+  }
+
+  if (handleHelpMode(pi, parsed.options)) return;
+
+  requireCommandConfirmationUi(ctx, parsed.options.confirm);
+  await waitForIdleIfNeeded(ctx);
+
+  const workflowOptions = buildWorkflowOptions(ctx, parsed.options, options);
+  const result = await draftAndCreateCommit(pi, workflowOptions);
+  handleWorkflowResult(pi, ctx, result);
+}
+
 export function registerCommitMeCommand(pi: ExtensionAPI, options: RegisterCommitMeCommandOptions = {}) {
   pi.registerCommand(COMMITME_COMMAND_NAME, {
     description: "Create a Conventional Commit from staged and unstaged git changes",
-    handler: async (args, ctx) => {
-      const parsed = parseCommitMeArgs(args);
-      if (!parsed.ok) {
-        ctx.ui.notify(`${EXTENSION_DISPLAY_NAME}: ${parsed.error}`, "warning");
-        return;
-      }
-
-      if (parsed.options.mode === "help") {
-        sendCommitMeHelp(pi);
-        return;
-      }
-
-      if (parsed.options.confirm && !ctx.hasUI) {
-        throw new Error(`${EXTENSION_DISPLAY_NAME}: --confirm requires a UI-capable Pi mode.`);
-      }
-
-      if (!ctx.isIdle()) {
-        ctx.ui.notify(`${EXTENSION_DISPLAY_NAME}: waiting for the current agent turn to finish...`, "info");
-        await ctx.waitForIdle();
-      }
-
-      const result = await draftAndCreateCommit(pi, {
-        cwd: ctx.cwd,
-        signal: ctx.signal,
-        steeringPrompt: parsed.options.steeringPrompt,
-        draftContext: ctx,
-        ...(options.draftCommitMessage ? { draftCommitMessage: options.draftCommitMessage } : {}),
-        confirmCommit: (subject) => confirmCommitIfNeeded(ctx, subject, parsed.options.confirm),
-      });
-
-      if (result.status === "no-changes") {
-        ctx.ui.notify(`${EXTENSION_DISPLAY_NAME}: no staged or unstaged git changes found.`, "warning");
-        return;
-      }
-
-      if (result.status === "cancelled") {
-        ctx.ui.notify(`${EXTENSION_DISPLAY_NAME}: commit cancelled.`, "info");
-        return;
-      }
-
-      sendCommitMeMessage(pi, `Committed ${result.committed.commitHash}: ${result.committed.subject}`, result.details);
-    },
+    handler: (args, ctx) => handleCommitMeCommand(pi, options, args, ctx),
   });
 }

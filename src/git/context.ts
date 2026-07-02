@@ -30,11 +30,76 @@ import { appendTruncationNotice, truncateText } from "../utils/truncation.ts";
 const CONTENT_SENSITIVITY_SCAN_MAX_BYTES = 128_000;
 const SECRET_SCAN_CHUNK_BYTES = 64_000;
 const SECRET_SCAN_OVERLAP_CHARS = 4_096;
-const SECRET_ASSIGNMENT_RE =
-  /(?:^|[^A-Za-z0-9])(?:api[_-]?key|access[_-]?key|access[_-]?token|auth[_-]?token|bearer[_-]?token|client[_-]?secret|credential|credentials|id[_-]?token|password|passwd|private[_-]?key|refresh[_-]?token|secret|session[_-]?token|token)\s*[:=]\s*[^\s#]+/i;
-const HIGH_CONFIDENCE_SECRET_RE =
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----|Authorization:\s*Bearer\s+[A-Za-z0-9._~+/=-]{20,}|\b(?:AKIA|ASIA)[A-Z0-9]{16}\b|\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{20,}\b|\bglpat-[A-Za-z0-9_-]{20,}\b|\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b|\bxox[barps]-[A-Za-z0-9-]{20,}\b|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/gi;
-const SECRET_PLACEHOLDER_RE = /fake|dummy|example|placeholder|not[-_]?real|changeme|redacted|xxxx/i;
+const SECRET_KEY_SUFFIXES = [
+  "api_key",
+  "access_key",
+  "access_token",
+  "auth_token",
+  "bearer_token",
+  "client_secret",
+  "credential",
+  "credentials",
+  "id_token",
+  "password",
+  "passwd",
+  "private_key",
+  "refresh_token",
+  "secret",
+  "session_token",
+  "token",
+];
+const SECRET_PLACEHOLDER_TERMS = ["fake", "dummy", "example", "placeholder", "not-real", "not_real", "changeme", "redacted", "xxxx"];
+const SECRET_PATH_BASENAMES = new Set([
+  ".env",
+  ".envrc",
+  ".dockercfg",
+  ".netrc",
+  ".npmrc",
+  ".pypirc",
+  "_netrc",
+  "id_rsa",
+  "id_dsa",
+  "id_ecdsa",
+  "id_ed25519",
+  "kubeconfig",
+]);
+const SECRET_PATH_EXTENSIONS = new Set([".pem", ".key", ".p12", ".pfx", ".crt", ".cer"]);
+const GENERATED_PATH_SEGMENTS = new Set(["node_modules", "dist", "build", "coverage", ".git", ".cache", ".local", ".turbo", ".next", "vendor"]);
+const BINARY_PATH_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".ico",
+  ".pdf",
+  ".zip",
+  ".gz",
+  ".tgz",
+  ".xz",
+  ".7z",
+  ".tar",
+  ".mp4",
+  ".mov",
+  ".avi",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".eot",
+  ".wasm",
+  ".bin",
+]);
+const HIGH_CONFIDENCE_SECRET_PATTERNS = [
+  { name: "private key", pattern: new RegExp(String.raw`-----BEGIN [A-Z ]*PRIVATE KEY-----`, "g") },
+  { name: "bearer token", pattern: new RegExp(String.raw`Authorization:\s*Bearer\s+[A-Za-z0-9._~+/=-]{20,}`, "gi") },
+  { name: "AWS access key", pattern: new RegExp(String.raw`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`, "g") },
+  { name: "GitHub token", pattern: new RegExp(String.raw`\b(?:ghp|gho|ghu|ghs|ghr)_\w{36,}\b`, "g") },
+  { name: "GitHub fine-grained token", pattern: new RegExp(String.raw`\bgithub_pat_\w{20,}\b`, "g") },
+  { name: "GitLab token", pattern: new RegExp(String.raw`\bglpat-[A-Za-z0-9_-]{20,}\b`, "g") },
+  { name: "OpenAI token", pattern: new RegExp(String.raw`\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b`, "g") },
+  { name: "Slack token", pattern: new RegExp(String.raw`\bxox[barps]-[A-Za-z0-9-]{20,}\b`, "g") },
+  { name: "JWT", pattern: new RegExp(String.raw`\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`, "g") },
+];
 
 export class GitCommandError extends Error {
   readonly code: string;
@@ -121,81 +186,181 @@ export async function getBranchName(
   return { branch: head.length > 0 ? `HEAD:${head}` : "HEAD", isDetachedHead: true };
 }
 
+function normalizeRepositoryPath(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+function pathBasename(path: string): string {
+  return normalizeRepositoryPath(path).split("/").at(-1)?.toLowerCase() ?? "";
+}
+
+function pathSegments(path: string): string[] {
+  return normalizeRepositoryPath(path).split("/").map((segment) => segment.toLowerCase());
+}
+
+function pathExtension(basename: string): string {
+  const index = basename.lastIndexOf(".");
+  return index === -1 ? "" : basename.slice(index);
+}
+
+function isNameDelimiter(character: string): boolean {
+  return character === "." || character === "_" || character === "-";
+}
+
+function splitNameMarkers(value: string): string[] {
+  const markers: string[] = [];
+  let current = "";
+  for (const character of value.toLowerCase()) {
+    if (isNameDelimiter(character)) {
+      if (current) markers.push(current);
+      current = "";
+    } else {
+      current += character;
+    }
+  }
+  if (current) markers.push(current);
+  return markers;
+}
+
+function hasMarkerSequence(markers: string[], first: string, second: string): boolean {
+  return markers.some((marker, index) => marker === first && markers[index + 1] === second);
+}
+
+function hasSecretBasenameMarker(basename: string): boolean {
+  const markers = splitNameMarkers(basename);
+  return (
+    markers.some((marker) => marker === "secret" || marker === "secrets" || marker === "credential" || marker === "credentials") ||
+    hasMarkerSequence(markers, "private", "key") ||
+    hasMarkerSequence(markers, "service", "account")
+  );
+}
+
+function hasTokenBasenameMarker(basename: string): boolean {
+  return splitNameMarkers(basename).includes("token");
+}
+
 function isDotEnvVariantPath(path: string): boolean {
-  const basename = path.replace(/\\/g, "/").split("/").at(-1)?.toLowerCase() ?? "";
-  return basename.startsWith(".env.");
+  return pathBasename(path).startsWith(".env.");
 }
 
 export function isKnownSecretPath(path: string): boolean {
-  const normalized = path.replace(/\\/g, "/");
-  const segments = normalized.split("/").map((segment) => segment.toLowerCase());
+  const segments = pathSegments(path);
   const basename = segments.at(-1) ?? "";
   const parentDirectories = new Set(segments.slice(0, -1));
 
   if (isDotEnvVariantPath(path)) return false;
 
   return (
-    basename === ".env" ||
-    basename === ".envrc" ||
-    basename === ".dockercfg" ||
-    basename === ".netrc" ||
-    basename === ".npmrc" ||
-    basename === ".pypirc" ||
-    basename === "_netrc" ||
-    basename === "id_rsa" ||
-    basename === "id_dsa" ||
-    basename === "id_ecdsa" ||
-    basename === "id_ed25519" ||
-    basename === "kubeconfig" ||
+    SECRET_PATH_BASENAMES.has(basename) ||
     basename.endsWith(".kubeconfig") ||
     (parentDirectories.has(".kube") && basename === "config") ||
     (parentDirectories.has(".docker") && basename === "config.json") ||
     (parentDirectories.has(".aws") && (basename === "credentials" || basename === "config")) ||
-    /(^|[._-])(secret|secrets|credential|credentials|private-key|service[._-]?account)([._-]|$)/i.test(basename) ||
-    /\.(pem|key|p12|pfx|crt|cer)$/i.test(basename)
+    hasSecretBasenameMarker(basename) ||
+    SECRET_PATH_EXTENSIONS.has(pathExtension(basename))
   );
 }
 
 export function isSensitivePath(path: string): boolean {
   if (isDotEnvVariantPath(path)) return false;
-  const basename = path.replace(/\\/g, "/").split("/").at(-1)?.toLowerCase() ?? "";
-  return isKnownSecretPath(path) || /(^|[._-])token([._-]|$)/i.test(basename);
+  return isKnownSecretPath(path) || hasTokenBasenameMarker(pathBasename(path));
 }
 
 export function isGeneratedPath(path: string): boolean {
-  const normalized = path.replace(/\\/g, "/");
-  return /(^|\/)(node_modules|dist|build|coverage|\.git|\.cache|\.local|\.turbo|\.next|vendor)(\/|$)/.test(
-    normalized,
-  );
+  return pathSegments(path).some((segment) => GENERATED_PATH_SEGMENTS.has(segment));
 }
 
 export function looksBinaryByPath(path: string): boolean {
-  return /\.(png|jpe?g|gif|webp|ico|pdf|zip|gz|tgz|xz|7z|tar|mp4|mov|avi|woff2?|ttf|eot|wasm|bin)$/i.test(path);
+  return BINARY_PATH_EXTENSIONS.has(pathExtension(pathBasename(path)));
 }
 
 function isBinaryBuffer(buffer: Buffer): boolean {
   return buffer.subarray(0, Math.min(buffer.length, 8_000)).includes(0);
 }
 
-export function looksHighConfidenceSecretContent(text: string): boolean {
-  for (const match of text.matchAll(HIGH_CONFIDENCE_SECRET_RE)) {
-    const value = match[0];
-    if (!SECRET_PLACEHOLDER_RE.test(value)) return true;
+function normalizedSecretKeyName(key: string): string {
+  return key.toLowerCase().replaceAll("-", "_");
+}
+
+function secretKeySuffixMatches(normalized: string, suffix: string): boolean {
+  const compact = normalized.replaceAll("_", "");
+  const compactSuffix = suffix.replaceAll("_", "");
+  return normalized === suffix || normalized.endsWith(`_${suffix}`) || compact === compactSuffix;
+}
+
+function isSecretLikeKeyName(key: string): boolean {
+  const normalized = normalizedSecretKeyName(key);
+  return SECRET_KEY_SUFFIXES.some((suffix) => secretKeySuffixMatches(normalized, suffix));
+}
+
+function isSecretKeyCharacter(character: string): boolean {
+  const codePoint = character.codePointAt(0);
+  if (codePoint === undefined) return false;
+  const isDigit = codePoint >= 48 && codePoint <= 57;
+  const isUpper = codePoint >= 65 && codePoint <= 90;
+  const isLower = codePoint >= 97 && codePoint <= 122;
+  return isDigit || isUpper || isLower || character === "_" || character === "-";
+}
+
+function readKeyBeforeOperator(text: string, operatorIndex: number): string {
+  let start = operatorIndex - 1;
+  while (start >= 0 && isSecretKeyCharacter(text[start] ?? "")) start -= 1;
+  return text.slice(start + 1, operatorIndex);
+}
+
+function hasAssignedValue(text: string, operatorIndex: number): boolean {
+  const value = text.slice(operatorIndex + 1).trim();
+  return value.length > 0 && !value.startsWith("#");
+}
+
+function hasSecretLikeAssignment(text: string): boolean {
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character !== ":" && character !== "=") continue;
+    const key = readKeyBeforeOperator(text, index);
+    if (key && isSecretLikeKeyName(key) && hasAssignedValue(text, index)) return true;
   }
   return false;
 }
 
+function isPlaceholderSecret(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return SECRET_PLACEHOLDER_TERMS.some((term) => normalized.includes(term));
+}
+
+function patternHasRealSecret(pattern: RegExp, text: string): boolean {
+  pattern.lastIndex = 0;
+  let match = pattern.exec(text);
+  while (match) {
+    const value = match[0];
+    if (!isPlaceholderSecret(value)) return true;
+    match = pattern.exec(text);
+  }
+  return false;
+}
+
+export function looksHighConfidenceSecretContent(text: string): boolean {
+  return HIGH_CONFIDENCE_SECRET_PATTERNS.some((entry) => patternHasRealSecret(entry.pattern, text));
+}
+
 export function looksSensitiveContent(text: string): boolean {
-  return SECRET_ASSIGNMENT_RE.test(text) || looksHighConfidenceSecretContent(text);
+  return hasSecretLikeAssignment(text) || looksHighConfidenceSecretContent(text);
+}
+
+function lineEndingNormalizedLines(text: string): string[] {
+  return text.replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
+}
+
+function diffLinePrefix(line: string): string {
+  const first = line[0] ?? "";
+  return first === "+" || first === "-" || first === " " ? first : "";
 }
 
 function redactSensitiveLines(text: string): string {
-  return text
-    .split(/\r?\n/)
+  return lineEndingNormalizedLines(text)
     .map((line) => {
       if (!looksSensitiveContent(line)) return line;
-      const diffPrefix = /^[+\- ]/.test(line) ? line[0] : "";
-      return `${diffPrefix}[redacted sensitive line]`;
+      return `${diffLinePrefix(line)}[redacted sensitive line]`;
     })
     .join("\n");
 }
@@ -230,7 +395,7 @@ async function getReadableRepositoryFile(root: string, path: string): Promise<st
     const target = resolve(dirname(absolute), targetPath);
     if (!isInsidePath(repositoryRoot, target)) return { path, reason: "outside-repository" };
 
-    const targetRelativePath = relative(repositoryRoot, target).replace(/\\/g, "/");
+    const targetRelativePath = normalizeRepositoryPath(relative(repositoryRoot, target));
     const targetSkipReason = skippedReasonForRepositoryPath(targetRelativePath);
     if (targetSkipReason) return { path, reason: targetSkipReason };
 
@@ -242,8 +407,8 @@ async function getReadableRepositoryFile(root: string, path: string): Promise<st
   const canonicalFilePath = await realpath(absolute);
   if (!isInsidePath(repositoryRoot, canonicalFilePath)) return { path, reason: "outside-repository" };
 
-  const canonicalRelativePath = relative(repositoryRoot, canonicalFilePath).replace(/\\/g, "/");
-  if (canonicalRelativePath !== path.replace(/\\/g, "/")) {
+  const canonicalRelativePath = normalizeRepositoryPath(relative(repositoryRoot, canonicalFilePath));
+  if (canonicalRelativePath !== normalizeRepositoryPath(path)) {
     const canonicalSkipReason = skippedReasonForRepositoryPath(canonicalRelativePath);
     return { path, reason: canonicalSkipReason ?? "symlink" };
   }
@@ -477,6 +642,10 @@ export async function gatherProjectContext(
   return { root, metadata, changedFileSnippets, skipped };
 }
 
+function isRenameOrCopyStatus(status: string): boolean {
+  return status.startsWith("R") || status.startsWith("C");
+}
+
 export function parseNameStatusZ(output: string, scope: GitChangeScope): ChangedFile[] {
   const files: ChangedFile[] = [];
   const fields = output.split("\0");
@@ -485,9 +654,8 @@ export function parseNameStatusZ(output: string, scope: GitChangeScope): Changed
     const status = fields[index++];
     if (!status) continue;
 
-    const isRenameOrCopy = /^[RC]/.test(status);
     const firstPath = fields[index++];
-    const secondPath = isRenameOrCopy ? fields[index++] : undefined;
+    const secondPath = isRenameOrCopyStatus(status) ? fields[index++] : undefined;
     const path = secondPath ?? firstPath;
     if (!path) continue;
 
@@ -510,33 +678,65 @@ function createChangedFile(path: string, status: string, scope: GitChangeScope, 
   };
 }
 
+interface StatusPorcelainRecord {
+  xy: string;
+  path: string;
+  previousPath?: string;
+}
+
+interface StatusPorcelainReadResult {
+  nextIndex: number;
+  record?: StatusPorcelainRecord;
+}
+
+function statusHasRenameOrCopySource(xy: string): boolean {
+  return xy.includes("R") || xy.includes("C");
+}
+
+function readStatusPorcelainRecord(records: string[], index: number): StatusPorcelainReadResult {
+  const record = records[index];
+  const nextIndex = index + 1;
+  if (!record) return { nextIndex };
+
+  const xy = record.slice(0, 2);
+  const path = record.slice(3);
+  if (!path) return { nextIndex };
+  if (!statusHasRenameOrCopySource(xy)) return { nextIndex, record: { xy, path } };
+
+  return {
+    nextIndex: nextIndex + 1,
+    record: { xy, path, previousPath: records[nextIndex] },
+  };
+}
+
+function hasStatusChange(status: string): boolean {
+  return status !== " " && status !== "?";
+}
+
+function relatedPathsForStatus(record: StatusPorcelainRecord): string[] {
+  return record.previousPath ? [record.previousPath] : [];
+}
+
+function changedFilesForStatusRecord(record: StatusPorcelainRecord): ChangedFile[] {
+  const relatedPaths = relatedPathsForStatus(record);
+  if (record.xy === "??") return [createChangedFile(record.path, "??", "unstaged", relatedPaths)];
+
+  const files: ChangedFile[] = [];
+  const indexStatus = record.xy[0] ?? " ";
+  const worktreeStatus = record.xy[1] ?? " ";
+  if (hasStatusChange(indexStatus)) files.push(createChangedFile(record.path, indexStatus, "staged", relatedPaths));
+  if (hasStatusChange(worktreeStatus)) files.push(createChangedFile(record.path, worktreeStatus, "unstaged", relatedPaths));
+  return files;
+}
+
 export function parseStatusPorcelainZ(output: string): ChangedFile[] {
   const files: ChangedFile[] = [];
   const records = output.split("\0");
 
   for (let index = 0; index < records.length; ) {
-    const record = records[index++];
-    if (!record) continue;
-
-    const xy = record.slice(0, 2);
-    const path = record.slice(3);
-    const hasRenameSource = xy.includes("R") || xy.includes("C");
-    const previousPath = hasRenameSource ? records[index++] : undefined;
-    if (!path) continue;
-
-    const relatedPaths = previousPath ? [previousPath] : [];
-    const indexStatus = xy[0] ?? " ";
-    const worktreeStatus = xy[1] ?? " ";
-    if (xy === "??") {
-      files.push(createChangedFile(path, "??", "unstaged", relatedPaths));
-      continue;
-    }
-    if (indexStatus !== " " && indexStatus !== "?") {
-      files.push(createChangedFile(path, indexStatus, "staged", relatedPaths));
-    }
-    if (worktreeStatus !== " " && worktreeStatus !== "?") {
-      files.push(createChangedFile(path, worktreeStatus, "unstaged", relatedPaths));
-    }
+    const readResult = readStatusPorcelainRecord(records, index);
+    index = readResult.nextIndex;
+    if (readResult.record) files.push(...changedFilesForStatusRecord(readResult.record));
   }
   return files;
 }

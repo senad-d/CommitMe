@@ -7,12 +7,20 @@ import type {
   CommitMessageValidationResult,
   CommitResult,
 } from "../types.ts";
+import { formatDisplayPath } from "../utils/display-path.ts";
 import { gatherGitContext, isKnownSecretPath, runGit, STATUS_PORCELAIN_ARGS } from "./context.ts";
 
 const COMMIT_TYPE_PATTERN = CONVENTIONAL_COMMIT_TYPES.join("|");
-const CONVENTIONAL_SUBJECT_RE = new RegExp(
-  `^(${COMMIT_TYPE_PATTERN})(\\([A-Za-z0-9._\\/-]+\\))?!?: (?<summary>[^\\s].*)$`,
+const CONVENTIONAL_SUBJECT_RE = new RegExp(String.raw`^(${COMMIT_TYPE_PATTERN})(\([A-Za-z0-9._/-]+\))?!?: (?<summary>[^\s].*)$`);
+const MARKDOWN_FENCE_LANGUAGE_RE = /^[A-Za-z0-9_-]+$/u;
+const MATCHING_QUOTES_RE = new RegExp(String.raw`^(["'])([\s\S]*)\1$`);
+const SIMPLE_PREFIX_RE = new RegExp(
+  String.raw`^(?:final\s+answer|final\s+commit\s+message|commit\s+message|message|subject):\s*`,
+  "i",
 );
+const HERE_IS_PREFIX_RE = new RegExp(String.raw`^here(?:'s|\s+is)\s+(?:the\s+)?(?:final\s+)?(?:commit\s+message|message):\s*`, "i");
+const LIST_BULLET_RE = new RegExp(String.raw`^[-*]\s+`);
+const LIST_NUMBER_RE = new RegExp(String.raw`^\d+[.)]\s+`);
 
 export class CommitMeCommitError extends Error {
   readonly code: string;
@@ -82,15 +90,6 @@ export function findUnsafeCommitFiles(files: ChangedFile[]): ChangedFile[] {
   return [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path));
 }
 
-function formatDisplayPath(path: string): string {
-  return path.replace(/[\x00-\x1f\x7f]/g, (character) => {
-    if (character === "\r") return "\\r";
-    if (character === "\n") return "\\n";
-    if (character === "\t") return "\\t";
-    return `\\x${character.charCodeAt(0).toString(16).padStart(2, "0")}`;
-  });
-}
-
 export function assertNoUnsafeCommitFiles(files: ChangedFile[]): void {
   const unsafeFiles = findUnsafeCommitFiles(files);
   if (unsafeFiles.length === 0) return;
@@ -104,49 +103,62 @@ export function assertNoUnsafeCommitFiles(files: ChangedFile[]): void {
   );
 }
 
+function isMarkdownFenceOpening(line: string): boolean {
+  if (line === "```") return true;
+  if (!line.startsWith("```")) return false;
+  return MARKDOWN_FENCE_LANGUAGE_RE.test(line.slice(3));
+}
+
 function stripMarkdownFence(text: string): string {
   const trimmed = text.trim();
-  const match = trimmed.match(/^```(?:\w+)?\s*\n([\s\S]*?)\n```$/);
-  return match?.[1]?.trim() ?? trimmed;
+  const lines = trimmed.split("\n");
+  if (lines.length < 3) return trimmed;
+
+  const openingFence = lines[0]?.trim() ?? "";
+  const closingFence = lines.at(-1)?.trim() ?? "";
+  if (!isMarkdownFenceOpening(openingFence) || closingFence !== "```") return trimmed;
+
+  return lines.slice(1, -1).join("\n").trim();
 }
 
 function stripMatchingQuotes(text: string): string {
-  const match = text.match(/^(["'])([\s\S]*)\1$/);
+  const match = MATCHING_QUOTES_RE.exec(text);
   return match?.[2]?.trim() ?? text;
 }
 
 function stripSimplePrefix(text: string): string {
-  return text
-    .replace(/^(?:final\s+answer|final\s+commit\s+message|commit\s+message|message|subject):\s*/i, "")
-    .replace(/^here(?:'s|\s+is)\s+(?:the\s+)?(?:final\s+)?(?:commit\s+message|message):\s*/i, "")
-    .trim();
+  return text.replace(SIMPLE_PREFIX_RE, "").replace(HERE_IS_PREFIX_RE, "").trim();
 }
 
 function stripListMarker(text: string): string {
-  return text.replace(/^[-*]\s+/, "").replace(/^\d+[.)]\s+/, "").trim();
+  return text.replace(LIST_BULLET_RE, "").replace(LIST_NUMBER_RE, "").trim();
 }
 
 function cleanSubjectLineCandidate(line: string): string {
   return stripListMarker(stripSimplePrefix(stripMatchingQuotes(line.trim()))).trim();
 }
 
+function isConventionalSubject(candidate: string): boolean {
+  return CONVENTIONAL_SUBJECT_RE.exec(candidate) !== null;
+}
+
 function findFirstConventionalSubjectLine(text: string): string | undefined {
   for (const line of text.split("\n")) {
     const candidate = cleanSubjectLineCandidate(line);
-    if (CONVENTIONAL_SUBJECT_RE.test(candidate)) return candidate;
+    if (isConventionalSubject(candidate)) return candidate;
   }
   return undefined;
 }
 
 export function extractCommitMessage(raw: string): string {
-  let text = stripMarkdownFence(raw.replace(/\r\n/g, "\n")).trim();
+  let text = stripMarkdownFence(raw.replaceAll("\r\n", "\n")).trim();
   text = stripMatchingQuotes(stripSimplePrefix(text)).trim();
 
   const lines = text.split("\n");
   const firstNonEmptyIndex = lines.findIndex((line) => line.trim().length > 0);
   if (firstNonEmptyIndex >= 0) {
     const cleanedFirstLine = cleanSubjectLineCandidate(lines[firstNonEmptyIndex] ?? "");
-    if (CONVENTIONAL_SUBJECT_RE.test(cleanedFirstLine)) return cleanedFirstLine;
+    if (isConventionalSubject(cleanedFirstLine)) return cleanedFirstLine;
   }
 
   const extractedSubject = findFirstConventionalSubjectLine(text);
@@ -166,7 +178,7 @@ export function validateCommitMessage(raw: string): CommitMessageValidationResul
     return { ok: false, error: "Commit message subject is empty." };
   }
 
-  const subjectMatch = subject.match(CONVENTIONAL_SUBJECT_RE);
+  const subjectMatch = CONVENTIONAL_SUBJECT_RE.exec(subject);
   if (!subjectMatch) {
     return {
       ok: false,

@@ -1,5 +1,5 @@
 import { StringEnum } from "@earendil-works/pi-ai";
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { defineTool, type AgentToolResult, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 
 import { collectGitContextTruncation, createCommitMeDetails } from "../commitme-details.ts";
@@ -8,6 +8,7 @@ import { assertNoUnsafeCommitFiles, createCommit, validateCommitMessage } from "
 import { gatherGitContext } from "../git/context.ts";
 import type { DraftCommitMessageDependency } from "../model/draft-commit-message.ts";
 import { buildBoundedCommitPrompt } from "../prompt/build-commit-prompt.ts";
+import type { CommitMeToolDetails, CommitResult, GitContext } from "../types.ts";
 import { draftAndCreateCommit } from "../workflows/commitme-commit-flow.ts";
 
 const COMMITME_TOOL_ACTIONS = ["gather", "commit"] as const;
@@ -37,6 +38,18 @@ export interface CreateCommitMeToolOptions {
   draftCommitMessage?: DraftCommitMessageDependency;
 }
 
+type CommitMeToolResult = AgentToolResult<CommitMeToolDetails>;
+
+type DraftedCommitResult = Awaited<ReturnType<typeof draftAndCreateCommit>>;
+
+interface CommitMeToolRuntime {
+  pi: ExtensionAPI;
+  options: CreateCommitMeToolOptions;
+  params: CommitMeToolInput;
+  signal: AbortSignal | undefined;
+  ctx: ExtensionContext;
+}
+
 function requireValidCommitMessage(message: string | undefined): string {
   if (!message || message.trim().length === 0) {
     throw new Error("commitme action=commit requires a final one-line Lightweight Conventional Commit subject.");
@@ -47,6 +60,124 @@ function requireValidCommitMessage(message: string | undefined): string {
     throw new Error(`commitme action=commit received an invalid Lightweight Conventional Commit subject: ${validation.error}`);
   }
   return validation.subject;
+}
+
+function requireConfirmationUi(ctx: ExtensionContext, confirm: boolean | undefined): void {
+  if (confirm && !ctx.hasUI) {
+    throw new Error("commitme confirm=true requires a UI-capable Pi mode.");
+  }
+}
+
+async function confirmCommit(ctx: ExtensionContext, message: string, confirm: boolean | undefined): Promise<boolean> {
+  requireConfirmationUi(ctx, confirm);
+  if (!confirm) return true;
+  return ctx.ui.confirm("CommitMe: create commit?", `Commit with this message?\n\n${message}`);
+}
+
+function cancelledCommitResult(context: GitContext, terminate?: true): CommitMeToolResult {
+  return {
+    content: [{ type: "text", text: "CommitMe commit cancelled; no git mutation was performed." }],
+    details: createCommitMeDetails("commit", context),
+    ...(terminate ? { terminate } : {}),
+  };
+}
+
+function committedResult(context: GitContext, committed: CommitResult, terminate?: true): CommitMeToolResult {
+  return {
+    content: [{ type: "text", text: `Committed ${committed.commitHash}: ${committed.subject}` }],
+    details: createCommitMeDetails("commit", context, { committed }),
+    ...(terminate ? { terminate } : {}),
+  };
+}
+
+function draftedCommitResult(result: DraftedCommitResult): CommitMeToolResult {
+  if (result.status === "no-changes") {
+    return {
+      content: [{ type: "text", text: "No staged or unstaged git changes found; no commit was created." }],
+      details: result.details,
+      terminate: true,
+    };
+  }
+
+  if (result.status === "cancelled") {
+    return {
+      content: [{ type: "text", text: "CommitMe commit cancelled; no git mutation was performed." }],
+      details: result.details,
+      terminate: true,
+    };
+  }
+
+  return {
+    content: [{ type: "text", text: `Committed ${result.committed.commitHash}: ${result.committed.subject}` }],
+    details: result.details,
+    terminate: true,
+  };
+}
+
+async function executeExplicitCommit(runtime: CommitMeToolRuntime): Promise<CommitMeToolResult> {
+  const message = requireValidCommitMessage(runtime.params.message);
+  requireConfirmationUi(runtime.ctx, runtime.params.confirm);
+
+  const context = await gatherGitContext(runtime.pi, { cwd: runtime.ctx.cwd, signal: runtime.signal });
+  assertNoUnsafeCommitFiles(context.changedFiles);
+
+  if (!(await confirmCommit(runtime.ctx, message, runtime.params.confirm))) {
+    return cancelledCommitResult(context);
+  }
+
+  const committed = await createCommit(runtime.pi, {
+    cwd: runtime.ctx.cwd,
+    signal: runtime.signal,
+    message,
+    expectedStatusPorcelain: context.statusPorcelain,
+  });
+  return committedResult(context, committed);
+}
+
+async function executeDraftedCommit(runtime: CommitMeToolRuntime): Promise<CommitMeToolResult> {
+  requireConfirmationUi(runtime.ctx, runtime.params.confirm);
+
+  const result = await draftAndCreateCommit(runtime.pi, {
+    cwd: runtime.ctx.cwd,
+    signal: runtime.signal,
+    steeringPrompt: runtime.params.steeringPrompt,
+    draftContext: { model: runtime.ctx.model, modelRegistry: runtime.ctx.modelRegistry, signal: runtime.signal },
+    ...(runtime.options.draftCommitMessage ? { draftCommitMessage: runtime.options.draftCommitMessage } : {}),
+    ...(runtime.params.confirm
+      ? { confirmCommit: (subject: string) => runtime.ctx.ui.confirm("CommitMe: create commit?", `Commit with this message?\n\n${subject}`) }
+      : {}),
+  });
+
+  return draftedCommitResult(result);
+}
+
+async function executeCommit(runtime: CommitMeToolRuntime): Promise<CommitMeToolResult> {
+  if (runtime.params.message !== undefined) return executeExplicitCommit(runtime);
+  return executeDraftedCommit(runtime);
+}
+
+async function executeGather(runtime: CommitMeToolRuntime): Promise<CommitMeToolResult> {
+  const context = await gatherGitContext(runtime.pi, { cwd: runtime.ctx.cwd, signal: runtime.signal });
+  const prompt = buildBoundedCommitPrompt(context, {
+    steeringPrompt: runtime.params.steeringPrompt,
+    modelContextWindow: runtime.ctx.model?.contextWindow,
+    modelMaxTokens: runtime.ctx.model?.maxTokens,
+  });
+  const details = createCommitMeDetails("gather", context, {
+    ...(runtime.params.steeringPrompt ? { steeringPrompt: runtime.params.steeringPrompt } : {}),
+    truncation: [...collectGitContextTruncation(context), ...prompt.truncation],
+    prompt: prompt.diagnostics,
+  });
+  const content = [
+    "CommitMe gathered local git context. Use the instructions below to produce exactly one Lightweight Conventional Commit subject line as your next assistant response. Do not summarize this prompt.",
+    "",
+    prompt.text,
+  ].join("\n");
+
+  return {
+    content: [{ type: "text", text: content }],
+    details,
+  };
 }
 
 export function createCommitMeTool(pi: ExtensionAPI, options: CreateCommitMeToolOptions = {}) {
@@ -72,98 +203,10 @@ export function createCommitMeTool(pi: ExtensionAPI, options: CreateCommitMeTool
     executionMode: "sequential",
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const runtime = { pi, options, params, signal, ctx };
       const action = params.action ?? "gather";
-
-      if (action === "commit") {
-        if (params.message !== undefined) {
-          const message = requireValidCommitMessage(params.message);
-          if (params.confirm && !ctx.hasUI) {
-            throw new Error("commitme confirm=true requires a UI-capable Pi mode.");
-          }
-
-          const context = await gatherGitContext(pi, { cwd: ctx.cwd, signal });
-          assertNoUnsafeCommitFiles(context.changedFiles);
-
-          if (params.confirm) {
-            const confirmed = await ctx.ui.confirm("CommitMe: create commit?", `Commit with this message?\n\n${message}`);
-            if (!confirmed) {
-              return {
-                content: [{ type: "text", text: "CommitMe commit cancelled; no git mutation was performed." }],
-                details: createCommitMeDetails("commit", context),
-              };
-            }
-          }
-          const committed = await createCommit(pi, {
-            cwd: ctx.cwd,
-            signal,
-            message,
-            expectedStatusPorcelain: context.statusPorcelain,
-          });
-          return {
-            content: [{ type: "text", text: `Committed ${committed.commitHash}: ${committed.subject}` }],
-            details: createCommitMeDetails("commit", context, { committed }),
-          };
-        }
-
-        if (params.confirm && !ctx.hasUI) {
-          throw new Error("commitme confirm=true requires a UI-capable Pi mode.");
-        }
-
-        const result = await draftAndCreateCommit(pi, {
-          cwd: ctx.cwd,
-          signal,
-          steeringPrompt: params.steeringPrompt,
-          draftContext: { model: ctx.model, modelRegistry: ctx.modelRegistry, signal },
-          ...(options.draftCommitMessage ? { draftCommitMessage: options.draftCommitMessage } : {}),
-          ...(params.confirm
-            ? { confirmCommit: (subject: string) => ctx.ui.confirm("CommitMe: create commit?", `Commit with this message?\n\n${subject}`) }
-            : {}),
-        });
-
-        if (result.status === "no-changes") {
-          return {
-            content: [{ type: "text", text: "No staged or unstaged git changes found; no commit was created." }],
-            details: result.details,
-            terminate: true,
-          };
-        }
-
-        if (result.status === "cancelled") {
-          return {
-            content: [{ type: "text", text: "CommitMe commit cancelled; no git mutation was performed." }],
-            details: result.details,
-            terminate: true,
-          };
-        }
-
-        return {
-          content: [{ type: "text", text: `Committed ${result.committed.commitHash}: ${result.committed.subject}` }],
-          details: result.details,
-          terminate: true,
-        };
-      }
-
-      const context = await gatherGitContext(pi, { cwd: ctx.cwd, signal });
-      const prompt = buildBoundedCommitPrompt(context, {
-        steeringPrompt: params.steeringPrompt,
-        modelContextWindow: ctx.model?.contextWindow,
-        modelMaxTokens: ctx.model?.maxTokens,
-      });
-      const details = createCommitMeDetails("gather", context, {
-        ...(params.steeringPrompt ? { steeringPrompt: params.steeringPrompt } : {}),
-        truncation: [...collectGitContextTruncation(context), ...prompt.truncation],
-        prompt: prompt.diagnostics,
-      });
-      const content = [
-        "CommitMe gathered local git context. Use the instructions below to produce exactly one Lightweight Conventional Commit subject line as your next assistant response. Do not summarize this prompt.",
-        "",
-        prompt.text,
-      ].join("\n");
-
-      return {
-        content: [{ type: "text", text: content }],
-        details,
-      };
+      if (action === "commit") return executeCommit(runtime);
+      return executeGather(runtime);
     },
   });
 }

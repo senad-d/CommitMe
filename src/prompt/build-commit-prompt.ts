@@ -23,6 +23,7 @@ import type {
   PromptSectionBudget,
   TruncationMetadata,
 } from "../types.ts";
+import { formatDisplayPath } from "../utils/display-path.ts";
 import { appendTruncationNotice, byteLength, truncateText } from "../utils/truncation.ts";
 
 export type { CommitPromptPayload } from "../types.ts";
@@ -39,18 +40,15 @@ interface TruncatedSection {
   metadata: TruncationMetadata[];
 }
 
+const PROMPT_LIMITS_BY_PROFILE = {
+  compact: { maxBytes: COMPACT_PROMPT_MAX_BYTES, maxLines: COMPACT_PROMPT_MAX_LINES },
+  default: { maxBytes: DEFAULT_PROMPT_MAX_BYTES, maxLines: DEFAULT_PROMPT_MAX_LINES },
+  large: { maxBytes: LARGE_PROMPT_MAX_BYTES, maxLines: LARGE_PROMPT_MAX_LINES },
+} satisfies Record<CommitPromptBudget["profile"], { maxBytes: number; maxLines: number }>;
+
 function cleanBlock(text: string): string {
   const trimmed = text.trim();
   return trimmed.length > 0 ? trimmed : "(none)";
-}
-
-function formatPath(path: string): string {
-  return path.replace(/[\x00-\x1f\x7f]/g, (character) => {
-    if (character === "\r") return "\\r";
-    if (character === "\n") return "\\n";
-    if (character === "\t") return "\\t";
-    return `\\x${character.charCodeAt(0).toString(16).padStart(2, "0")}`;
-  });
 }
 
 function formatChangedFiles(files: ChangedFile[]): string {
@@ -65,7 +63,8 @@ function formatChangedFiles(files: ChangedFile[]): string {
       ]
         .filter(Boolean)
         .join(", ");
-      return `- ${file.scope}: ${file.status} ${formatPath(file.path)}${flags ? ` (${flags})` : ""}`;
+      const flagsSuffix = flags ? ` (${flags})` : "";
+      return `- ${file.scope}: ${file.status} ${formatDisplayPath(file.path)}${flagsSuffix}`;
     })
     .join("\n");
 }
@@ -73,13 +72,13 @@ function formatChangedFiles(files: ChangedFile[]): string {
 function formatProjectEntries(entries: ProjectContextEntry[]): string {
   if (entries.length === 0) return "(none)";
   return entries
-    .map((entry) => [`### ${formatPath(entry.path)}`, cleanBlock(entry.content)].join("\n"))
+    .map((entry) => [`### ${formatDisplayPath(entry.path)}`, cleanBlock(entry.content)].join("\n"))
     .join("\n\n");
 }
 
 function formatSkippedContext(context: GitContext): string {
   if (context.project.skipped.length === 0) return "(none)";
-  return context.project.skipped.map((entry) => `- ${formatPath(entry.path)}: ${entry.reason}`).join("\n");
+  return context.project.skipped.map((entry) => `- ${formatDisplayPath(entry.path)}: ${entry.reason}`).join("\n");
 }
 
 function formatWarnings(context: GitContext): string {
@@ -96,25 +95,24 @@ function normalizePositiveInteger(value: number | undefined): number | undefined
   return Math.floor(value);
 }
 
+function selectBudgetProfile(availableInputTokens: number | undefined): CommitPromptBudget["profile"] {
+  if (availableInputTokens !== undefined && availableInputTokens < 7_000) return "compact";
+  if (availableInputTokens !== undefined && availableInputTokens >= 32_000) return "large";
+  return "default";
+}
+
 export function selectCommitPromptBudget(options: Pick<CommitPromptOptions, "modelContextWindow" | "modelMaxTokens"> = {}): CommitPromptBudget {
   const contextWindow = normalizePositiveInteger(options.modelContextWindow);
   const modelMaxTokens = normalizePositiveInteger(options.modelMaxTokens) ?? DEFAULT_DRAFT_MAX_TOKENS;
   const availableInputTokens = contextWindow ? Math.max(0, contextWindow - Math.max(modelMaxTokens, DEFAULT_DRAFT_MAX_TOKENS)) : undefined;
-
-  const profile: CommitPromptBudget["profile"] = availableInputTokens && availableInputTokens < 7_000
-    ? "compact"
-    : availableInputTokens && availableInputTokens >= 32_000
-      ? "large"
-      : "default";
-
-  const maxBytes = profile === "compact" ? COMPACT_PROMPT_MAX_BYTES : profile === "large" ? LARGE_PROMPT_MAX_BYTES : DEFAULT_PROMPT_MAX_BYTES;
-  const maxLines = profile === "compact" ? COMPACT_PROMPT_MAX_LINES : profile === "large" ? LARGE_PROMPT_MAX_LINES : DEFAULT_PROMPT_MAX_LINES;
+  const profile = selectBudgetProfile(availableInputTokens);
+  const limits = PROMPT_LIMITS_BY_PROFILE[profile];
   const sectionConstants = COMMIT_PROMPT_SECTION_BUDGETS[profile];
 
   return {
     profile,
-    maxBytes,
-    maxLines,
+    maxBytes: limits.maxBytes,
+    maxLines: limits.maxLines,
     sections: {
       steeringPrompt: { ...sectionConstants.steeringPrompt },
       repositorySummary: { ...sectionConstants.repositorySummary },
@@ -164,11 +162,12 @@ function formatSteeringPrompt(steeringPrompt: string | undefined, budget: Prompt
 }
 
 function formatRepositorySummary(context: GitContext, budget: PromptSectionBudget): TruncatedSection {
-  const repoName = formatPath(basename(context.repositoryRoot) || context.repositoryRoot);
+  const repoName = formatDisplayPath(basename(context.repositoryRoot) || context.repositoryRoot);
+  const branchSuffix = context.isDetachedHead ? " (detached HEAD)" : "";
   return truncateSectionContent(
     [
       `- Name: ${repoName}`,
-      `- Branch: ${context.branch}${context.isDetachedHead ? " (detached HEAD)" : ""}`,
+      `- Branch: ${context.branch}${branchSuffix}`,
       `- Has changes: ${context.hasChanges ? "yes" : "no"}`,
       "",
       "Status:",

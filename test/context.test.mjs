@@ -11,6 +11,7 @@ import {
   getRepositoryRoot,
   GitCommandError,
   isKnownSecretPath,
+  looksHighConfidenceSecretContent,
   parseNameStatusZ,
   parseStatusPorcelainZ,
   runGit,
@@ -120,6 +121,55 @@ test("parseStatusPorcelainZ handles untracked paths with spaces", () => {
   assert.equal(files[0].path, "space file.txt");
   assert.equal(files[0].status, "??");
   assert.equal(files[0].scope, "unstaged");
+});
+
+test("parseStatusPorcelainZ handles staged-only records", () => {
+  const files = parseStatusPorcelainZ("A  staged.txt\0");
+
+  assert.deepEqual(files.map((file) => `${file.scope}:${file.status}:${file.path}`), ["staged:A:staged.txt"]);
+});
+
+test("parseStatusPorcelainZ handles unstaged-only records", () => {
+  const files = parseStatusPorcelainZ(" M unstaged.txt\0");
+
+  assert.deepEqual(files.map((file) => `${file.scope}:${file.status}:${file.path}`), ["unstaged:M:unstaged.txt"]);
+});
+
+test("parseStatusPorcelainZ handles staged plus unstaged records", () => {
+  const files = parseStatusPorcelainZ("MM changed.txt\0");
+
+  assert.deepEqual(files.map((file) => `${file.scope}:${file.status}:${file.path}`), ["staged:M:changed.txt", "unstaged:M:changed.txt"]);
+});
+
+test("parseStatusPorcelainZ handles rename records", () => {
+  const files = parseStatusPorcelainZ("R  new-name.txt\0old-name.txt\0");
+
+  assert.deepEqual(files.map((file) => `${file.scope}:${file.status}:${file.path}:${file.relatedPaths?.join(",")}`), [
+    "staged:R:new-name.txt:old-name.txt",
+  ]);
+});
+
+test("parseStatusPorcelainZ handles copy records", () => {
+  const files = parseStatusPorcelainZ("C  copy-name.txt\0source-name.txt\0");
+
+  assert.deepEqual(files.map((file) => `${file.scope}:${file.status}:${file.path}:${file.relatedPaths?.join(",")}`), [
+    "staged:C:copy-name.txt:source-name.txt",
+  ]);
+});
+
+test("looksHighConfidenceSecretContent covers token families and ignores placeholders", () => {
+  const samples = [
+    `aws: AKIA${"A".repeat(16)}`,
+    `github: ghp_${"A".repeat(36)}`,
+    `gitlab: glpat-${"A".repeat(20)}`,
+    `openai: sk-${"A".repeat(24)}`,
+    `slack: xoxb-${"1".repeat(20)}`,
+    `jwt: eyJ${"A".repeat(10)}.${"B".repeat(10)}.${"C".repeat(10)}`,
+    "-----BEGIN RSA PRIVATE KEY-----",
+  ];
+
+  assert.ok(samples.every((sample) => looksHighConfidenceSecretContent(sample)));
+  assert.equal(looksHighConfidenceSecretContent(`github: ghp_${"example".padEnd(36, "x")}`), false);
 });
 
 test("gatherGitContext captures staged-only changes", async () => {

@@ -7,7 +7,10 @@ export class DynamicBorder {
     this.color = color;
   }
 
-  invalidate() {}
+  invalidate() {
+    // Development shim border output is computed on render, so no invalidation work is needed.
+    return undefined;
+  }
 
   render(width) {
     return [this.color("─".repeat(Math.max(1, width)))];

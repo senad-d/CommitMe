@@ -40,7 +40,8 @@ function sliceToBytesFromTail(text: string, maxBytes: number): string {
     kept.push(char);
     bytes += nextBytes;
   }
-  return kept.reverse().join("");
+  kept.reverse();
+  return kept.join("");
 }
 
 function truncateLines(text: string, maxLines: number, strategy: TruncationStrategy): string {
