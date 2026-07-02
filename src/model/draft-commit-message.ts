@@ -1,4 +1,4 @@
-import { complete, type AssistantMessage } from "@earendil-works/pi-ai";
+import { complete, type AssistantMessage } from "@earendil-works/pi-ai/compat";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import {
