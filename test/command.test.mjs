@@ -82,6 +82,7 @@ test("buildCommitMeHelpText explains commands and safety", () => {
 
   assert.match(help, /\/commitme --confirm/);
   assert.match(help, /steering prompt/);
+  assert.match(help, /\/commitme --steering/);
   assert.match(help, /\/commitme help/);
   assert.doesNotMatch(help, /--commit\b/);
   assert.match(help, /never runs `git push`/);
@@ -258,7 +259,7 @@ test("/commitme --commit remains a non-confirming commit alias", async () => {
   });
 });
 
-test("/commitme refuses sensitive changed files before drafting or staging", async () => {
+test("/commitme refuses sensitive changed files without UI before drafting or staging", async () => {
   await withTempRepo(async (dir) => {
     await writeFile(join(dir, ".env"), "TOKEN=do-not-commit\n", "utf8");
 
@@ -274,7 +275,7 @@ test("/commitme refuses sensitive changed files before drafting or staging", asy
     });
 
     await assert.rejects(
-      () => registered.get("commitme").handler("", createCtx(dir, notifications)),
+      () => registered.get("commitme").handler("", createCtx(dir, notifications, async () => true, false)),
       /known secret files or high-confidence secret tokens/,
     );
     const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
@@ -285,7 +286,64 @@ test("/commitme refuses sensitive changed files before drafting or staging", asy
   });
 });
 
-test("/commitme refuses unreadable changed files before drafting or staging", { skip: process.platform === "win32" }, async () => {
+
+test("/commitme blocks sensitive changed files when UI approval is denied", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, ".env"), "TOKEN=do-not-commit\n", "utf8");
+
+    const calls = [];
+    const messages = [];
+    const notifications = [];
+    const confirmations = [];
+    const registered = new Map();
+    const pi = createPi(calls, messages, registered);
+    registerCommitMeCommand(pi, { draftCommitMessage: async () => "test: add env fixture" });
+
+    await registered.get("commitme").handler(
+      "",
+      createCtx(dir, notifications, async (title, body) => {
+        confirmations.push({ title, body });
+        return false;
+      }),
+    );
+    const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+
+    assert.equal(messages.length, 0);
+    assert.equal(confirmations.length, 1);
+    assert.match(confirmations[0].body, /\.env/);
+    assert.match(stdout, /\?\? \.env/);
+    assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
+    assert.ok(notifications.some((notice) => /commit blocked/.test(notice.message)));
+  });
+});
+
+test("/commitme commits sensitive changed files when UI approval is granted", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, ".env"), "TOKEN=do-not-commit\n", "utf8");
+
+    const messages = [];
+    const confirmations = [];
+    const registered = new Map();
+    const pi = createPi([], messages, registered);
+    registerCommitMeCommand(pi, { draftCommitMessage: async () => "test: add env fixture" });
+
+    await registered.get("commitme").handler(
+      "",
+      createCtx(dir, [], async (title, body) => {
+        confirmations.push({ title, body });
+        return true;
+      }),
+    );
+    const { stdout } = await execFileAsync("git", ["log", "-1", "--pretty=%s"], { cwd: dir });
+
+    assert.equal(stdout.trim(), "test: add env fixture");
+    assert.equal(messages.length, 1);
+    assert.equal(confirmations.length, 1);
+    assert.match(confirmations[0].body, /safe fixtures\/placeholders/);
+  });
+});
+
+test("/commitme refuses unreadable changed files without UI before drafting or staging", { skip: process.platform === "win32" }, async () => {
   await withTempRepo(async (dir) => {
     const unreadablePath = join(dir, "unreadable.txt");
     await writeFile(unreadablePath, "content that cannot be scanned\n", "utf8");
@@ -304,7 +362,7 @@ test("/commitme refuses unreadable changed files before drafting or staging", { 
       });
 
       await assert.rejects(
-        () => registered.get("commitme").handler("", createCtx(dir, notifications)),
+        () => registered.get("commitme").handler("", createCtx(dir, notifications, async () => true, false)),
         /unreadable changed files/,
       );
       const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });

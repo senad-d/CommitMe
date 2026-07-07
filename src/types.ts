@@ -198,6 +198,13 @@ export interface CommitResult {
   stderr: string;
 }
 
+export interface UnsafeCommitFileApprovalRequest {
+  files: ChangedFile[];
+  context: GitContext;
+}
+
+export type UnsafeCommitFileApproval = (request: UnsafeCommitFileApprovalRequest) => Promise<boolean>;
+
 export interface CommitMeToolDetails {
   action: "gather" | "commit" | "help";
   steeringPrompt?: string;

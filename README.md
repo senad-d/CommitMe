@@ -31,7 +31,7 @@ CommitMe is a pi extension for turning local git changes into clear one-line Lig
 
 - **Local-git native:** reads your current repository, stages the gathered changed paths, and commits with `git commit`.
 - **Local-model friendly:** builds a compact, priority-ordered prompt, reserves output budget, normalizes drafts to one subject line, and retries/repairs weak-model drafts when safe.
-- **Safety-aware:** omits secret-like content from model context and refuses known secret files, unreadable changed files, or high-confidence tokens.
+- **Safety-aware:** omits secret-like content from model context and prompts in UI-capable sessions before committing flagged unsafe files.
 - **No push, no telemetry:** CommitMe never runs `git push` and does not send usage telemetry.
 - **Pi-native:** use it as a slash command, agent tool, global package, project-local package, git install, or source checkout.
 
@@ -66,7 +66,7 @@ pi
 Start with confirmation enabled:
 
 ```text
-/commitme --confirm focus the message on the command steering support
+/commitme --confirm --steering focus the message on the command steering support
 ```
 
 When you are comfortable with the workflow, run the fast path:
@@ -113,7 +113,7 @@ Inside a git repository, run one of these in pi:
 
 ```text
 /commitme --confirm focus on the bug fix
-/commitme add steering support for commit generation
+/commitme --steering add steering support for commit generation
 /commitme -- --prefer feat if accurate
 /commitme help
 ```
@@ -159,6 +159,7 @@ Reload your shell and use it from any git repository:
 source ~/.zshrc
 commit
 commit focus on the parser and prompt-builder changes
+commit --steering focus on parser flag handling
 commit -- --prefer feat when accurate
 commit help
 ```
@@ -181,7 +182,8 @@ Notes:
 | --- | --- |
 | `/commitme [steering prompt]` | Generate a message, stage the gathered changed paths, and create a local commit. Optional steering guides wording, emphasis, type, and scope when supported by the git context. |
 | `/commitme --confirm [steering prompt]` | Generate a message, ask for confirmation, then commit only if you approve. |
-| `/commitme -- --steering that starts with a dash` | Use `--` before steering text that begins with `-` or `--`. |
+| `/commitme --steering <prompt>` | Pass explicit steering text (`--steering=<prompt>` also works). This is equivalent to positional steering and can be combined with `--confirm`. |
+| `/commitme -- --prompt-that-starts-with-a-dash` | Use `--` before positional steering text that begins with `-` or `--`. |
 | `/commitme help` | Show in-session help. `/commitme --help` and `/commitme -h` also work. |
 
 CommitMe waits for the current agent turn to finish before it gathers context. It aborts when there are no staged or unstaged changes.
@@ -238,8 +240,9 @@ For command drafting, gather-tool prompts, and message-less `commitme action="co
 - CommitMe does not send telemetry.
 - CommitMe uses only local `git` commands and the active pi LLM provider.
 - `/commitme --confirm` and `commitme action="commit", confirm: true` require a UI-capable pi mode.
+- If known secret paths, unreadable changed files, or high-confidence secret-like content are detected in a UI-capable session, CommitMe asks whether those flagged files are safe to commit; declining blocks the commit before staging.
 - The `commitme` tool mutates git history locally only for `action: "commit"`; message-less commit mode drafts like `/commitme`, while explicit-message mode uses the provided final subject.
-- Commit actions abort before staging if known secret files, unreadable changed files, or high-confidence secret tokens would be committed.
+- Commit actions abort before staging if known secret files, unreadable changed files, or high-confidence secret tokens would be committed in non-UI mode or if UI approval is denied.
 - `.env.*` files such as `.env.example`, `.env.local`, and `.env.production` are allowed by path; their contents are still redacted for model context and scanned for high-confidence secret tokens before staging.
 - Large, generated, binary-looking, unreadable, symlinked, and symlink-aliased changed-file contents are omitted from model context, but CommitMe still scans regular changed files locally to detect high-confidence secret tokens before staging.
 - Renames from sensitive paths and symlinks to sensitive repository paths stay omitted from model context and are checked or marked unsafe before staging.
@@ -261,7 +264,7 @@ See [`SECURITY.md`](SECURITY.md) for details.
 | No changes found | Check `git status`; CommitMe needs staged or unstaged changes. |
 | No active model or API key | Select/configure a pi model, or use the local-model shell function above. |
 | `--confirm requires a UI-capable Pi mode` | Run pi with the TUI, or use `/commitme` without confirmation in non-UI mode. |
-| Commit refused for secret files/tokens or unreadable files | Remove the file/token, make the changed file readable so CommitMe can scan it, or commit manually if intentional. |
+| Commit flagged for secret files/tokens or unreadable files | In the TUI, approve only if you reviewed the files and they contain safe fixtures/placeholders. In non-UI mode, remove the file/token, make the changed file readable, or commit manually if intentional. |
 | Git status changed while CommitMe was running | Rerun CommitMe so it can gather fresh context. |
 | Local model is too slow | Use a smaller model or shorten the diff before running CommitMe. |
 | Empty local-model draft, thinking-only response, or `stopReason=length` | CommitMe retries with a shorter final-answer prompt and larger output budget when possible. If it still fails, reduce the change size, lower/disable model thinking, try `/commitme --confirm`, or use the `commitme` gather tool and ask the agent to draft manually. |

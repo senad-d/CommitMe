@@ -4,12 +4,13 @@ import { Type, type Static } from "typebox";
 
 import { collectGitContextTruncation, createCommitMeDetails } from "../commitme-details.ts";
 import { COMMITME_TOOL_NAME, EXTENSION_DISPLAY_NAME } from "../constants.ts";
-import { assertNoUnsafeCommitFiles, createCommit, validateCommitMessage } from "../git/commit.ts";
+import { CommitMeCommitError, assertNoUnsafeCommitFiles, createCommit, validateCommitMessage } from "../git/commit.ts";
 import { gatherGitContext } from "../git/context.ts";
 import type { DraftCommitMessageDependency } from "../model/draft-commit-message.ts";
 import { buildBoundedCommitPrompt } from "../prompt/build-commit-prompt.ts";
 import type { CommitMeToolDetails, CommitResult, GitContext } from "../types.ts";
 import { draftAndCreateCommit } from "../workflows/commitme-commit-flow.ts";
+import { createUnsafeCommitFileApproval } from "../workflows/unsafe-commit-approval.ts";
 
 const COMMITME_TOOL_ACTIONS = ["gather", "commit"] as const;
 
@@ -90,6 +91,14 @@ function committedResult(context: GitContext, committed: CommitResult, terminate
   };
 }
 
+function blockedCommitResult(context: GitContext, terminate?: true): CommitMeToolResult {
+  return {
+    content: [{ type: "text", text: "CommitMe commit blocked because potentially unsafe files were not approved." }],
+    details: createCommitMeDetails("commit", context),
+    ...(terminate ? { terminate } : {}),
+  };
+}
+
 function draftedCommitResult(result: DraftedCommitResult): CommitMeToolResult {
   if (result.status === "no-changes") {
     return {
@@ -107,6 +116,14 @@ function draftedCommitResult(result: DraftedCommitResult): CommitMeToolResult {
     };
   }
 
+  if (result.status === "blocked") {
+    return {
+      content: [{ type: "text", text: "CommitMe commit blocked because potentially unsafe files were not approved." }],
+      details: result.details,
+      terminate: true,
+    };
+  }
+
   return {
     content: [{ type: "text", text: `Committed ${result.committed.commitHash}: ${result.committed.subject}` }],
     details: result.details,
@@ -119,30 +136,41 @@ async function executeExplicitCommit(runtime: CommitMeToolRuntime): Promise<Comm
   requireConfirmationUi(runtime.ctx, runtime.params.confirm);
 
   const context = await gatherGitContext(runtime.pi, { cwd: runtime.ctx.cwd, signal: runtime.signal });
-  assertNoUnsafeCommitFiles(context.changedFiles);
+  const approveUnsafeCommitFiles = createUnsafeCommitFileApproval(runtime.ctx);
+  if (!approveUnsafeCommitFiles) assertNoUnsafeCommitFiles(context.changedFiles);
 
   if (!(await confirmCommit(runtime.ctx, message, runtime.params.confirm))) {
     return cancelledCommitResult(context);
   }
 
-  const committed = await createCommit(runtime.pi, {
-    cwd: runtime.ctx.cwd,
-    signal: runtime.signal,
-    message,
-    expectedStatusPorcelain: context.statusPorcelain,
-  });
-  return committedResult(context, committed);
+  try {
+    const committed = await createCommit(runtime.pi, {
+      cwd: runtime.ctx.cwd,
+      signal: runtime.signal,
+      message,
+      expectedStatusPorcelain: context.statusPorcelain,
+      approveUnsafeCommitFiles,
+    });
+    return committedResult(context, committed);
+  } catch (error) {
+    if (error instanceof CommitMeCommitError && error.code === "unsafe-sensitive-files-blocked") {
+      return blockedCommitResult(context);
+    }
+    throw error;
+  }
 }
 
 async function executeDraftedCommit(runtime: CommitMeToolRuntime): Promise<CommitMeToolResult> {
   requireConfirmationUi(runtime.ctx, runtime.params.confirm);
 
+  const approveUnsafeCommitFiles = createUnsafeCommitFileApproval(runtime.ctx);
   const result = await draftAndCreateCommit(runtime.pi, {
     cwd: runtime.ctx.cwd,
     signal: runtime.signal,
     steeringPrompt: runtime.params.steeringPrompt,
     draftContext: { model: runtime.ctx.model, modelRegistry: runtime.ctx.modelRegistry, signal: runtime.signal },
     ...(runtime.options.draftCommitMessage ? { draftCommitMessage: runtime.options.draftCommitMessage } : {}),
+    ...(approveUnsafeCommitFiles ? { approveUnsafeCommitFiles } : {}),
     ...(runtime.params.confirm
       ? { confirmCommit: (subject: string) => runtime.ctx.ui.confirm("CommitMe: create commit?", `Commit with this message?\n\n${subject}`) }
       : {}),
@@ -185,7 +213,7 @@ export function createCommitMeTool(pi: ExtensionAPI, options: CreateCommitMeTool
     name: COMMITME_TOOL_NAME,
     label: EXTENSION_DISPLAY_NAME,
     description:
-      "CommitMe gathers local git diff and project context or creates local commits. Slash usage: /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] guides drafting, and /commitme help shows help. Tool usage: action=gather is read-only; action=commit with message uses an explicit final subject; action=commit without message drafts and commits like /commitme. CommitMe never pushes.",
+      "CommitMe gathers local git diff and project context or creates local commits. Slash usage: /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] or /commitme --steering guides drafting, and /commitme help shows help. Tool usage: action=gather is read-only; action=commit with message uses an explicit final subject; action=commit without message drafts and commits like /commitme. CommitMe never pushes.",
     promptSnippet: "Gather local git changes and project context for a one-line Lightweight Conventional Commit subject",
     promptGuidelines: [
       "Use commitme action=gather when the user asks for a commit message but not a commit.",
@@ -197,7 +225,7 @@ export function createCommitMeTool(pi: ExtensionAPI, options: CreateCommitMeTool
       "Set commitme confirm=true only when the user asks to review or confirm before committing.",
       "Use commitme in same-turn edit-and-commit flows only when the user explicitly requested that end-to-end workflow.",
       "Remember commitme never pushes.",
-      "Tell users that /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] guides drafting, and /commitme help shows usage when they ask how to run CommitMe.",
+      "Tell users that /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] or /commitme --steering guides drafting, and /commitme help shows usage when they ask how to run CommitMe.",
     ],
     parameters: CommitMeToolParameters,
     executionMode: "sequential",

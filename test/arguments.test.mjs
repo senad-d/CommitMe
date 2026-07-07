@@ -82,6 +82,28 @@ test("parseCommitMeArgs accepts steering prompt after flags", () => {
   assert.equal(parsed.options.steeringPrompt, "please focus on the parser change");
 });
 
+test("parseCommitMeArgs accepts --steering as an explicit steering flag", () => {
+  const parsed = parseCommitMeArgs("--confirm --steering please focus on the parser change");
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.options.mode, "commit");
+  assert.equal(parsed.options.confirm, true);
+  assert.equal(parsed.options.steeringPrompt, "please focus on the parser change");
+});
+
+test("parseCommitMeArgs accepts --steering=inline values", () => {
+  const parsed = parseCommitMeArgs("--steering=please focus on the parser change");
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.options.mode, "commit");
+  assert.equal(parsed.options.confirm, false);
+  assert.equal(parsed.options.steeringPrompt, "please focus on the parser change");
+});
+
+test("parseCommitMeArgs treats dash-prefixed text after --steering as steering text", () => {
+  const parsed = parseCommitMeArgs("--steering --prefer feat if accurate");
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.options.steeringPrompt, "--prefer feat if accurate");
+});
+
 test("parseCommitMeArgs treats flags after steering text as steering text", () => {
   const parsed = parseCommitMeArgs("please mention --confirm support");
   assert.equal(parsed.ok, true);

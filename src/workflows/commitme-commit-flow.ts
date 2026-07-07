@@ -1,5 +1,5 @@
 import { collectGitContextTruncation, createCommitMeDetails } from "../commitme-details.ts";
-import { assertNoUnsafeCommitFiles, createCommit, validateCommitMessage } from "../git/commit.ts";
+import { CommitMeCommitError, assertNoUnsafeCommitFiles, createCommit, validateCommitMessage } from "../git/commit.ts";
 import { gatherGitContext } from "../git/context.ts";
 import {
   draftCommitMessageWithActiveModelDiagnostics,
@@ -8,7 +8,14 @@ import {
   type DraftCommitMessageResult,
 } from "../model/draft-commit-message.ts";
 import { buildBoundedCommitPrompt } from "../prompt/build-commit-prompt.ts";
-import type { CommitMeExecutor, CommitMeToolDetails, CommitPromptPayload, CommitResult, GitContext } from "../types.ts";
+import type {
+  CommitMeExecutor,
+  CommitMeToolDetails,
+  CommitPromptPayload,
+  CommitResult,
+  GitContext,
+  UnsafeCommitFileApproval,
+} from "../types.ts";
 
 export interface DraftAndCreateCommitOptions {
   cwd?: string;
@@ -17,6 +24,7 @@ export interface DraftAndCreateCommitOptions {
   draftContext: DraftCommitMessageContext;
   draftCommitMessage?: DraftCommitMessageDependency;
   confirmCommit?: (subject: string) => Promise<boolean>;
+  approveUnsafeCommitFiles?: UnsafeCommitFileApproval;
 }
 
 export type CommitMeCommitFlowResult =
@@ -30,6 +38,13 @@ export type CommitMeCommitFlowResult =
     }
   | {
       status: "cancelled";
+      context: GitContext;
+      prompt: CommitPromptPayload;
+      subject: string;
+      details: CommitMeToolDetails;
+    }
+  | {
+      status: "blocked";
       context: GitContext;
       prompt: CommitPromptPayload;
       subject: string;
@@ -81,7 +96,7 @@ export async function draftAndCreateCommit(
     };
   }
 
-  assertNoUnsafeCommitFiles(context.changedFiles);
+  if (!options.approveUnsafeCommitFiles) assertNoUnsafeCommitFiles(context.changedFiles);
 
   const prompt = buildBoundedCommitPrompt(context, {
     steeringPrompt: options.steeringPrompt,
@@ -107,19 +122,33 @@ export async function draftAndCreateCommit(
     };
   }
 
-  const committed = await createCommit(executor, {
-    cwd: options.cwd,
-    signal: options.signal,
-    message: validation.subject,
-    expectedStatusPorcelain: context.statusPorcelain,
-  });
+  try {
+    const committed = await createCommit(executor, {
+      cwd: options.cwd,
+      signal: options.signal,
+      message: validation.subject,
+      expectedStatusPorcelain: context.statusPorcelain,
+      approveUnsafeCommitFiles: options.approveUnsafeCommitFiles,
+    });
 
-  return {
-    status: "committed",
-    context,
-    prompt,
-    subject: validation.subject,
-    committed,
-    details: createDraftCommitDetails(context, prompt, draft, { steeringPrompt: options.steeringPrompt, committed }),
-  };
+    return {
+      status: "committed",
+      context,
+      prompt,
+      subject: validation.subject,
+      committed,
+      details: createDraftCommitDetails(context, prompt, draft, { steeringPrompt: options.steeringPrompt, committed }),
+    };
+  } catch (error) {
+    if (error instanceof CommitMeCommitError && error.code === "unsafe-sensitive-files-blocked") {
+      return {
+        status: "blocked",
+        context,
+        prompt,
+        subject: validation.subject,
+        details,
+      };
+    }
+    throw error;
+  }
 }

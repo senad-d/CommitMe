@@ -6,6 +6,8 @@ import type {
   CommitMeExecutor,
   CommitMessageValidationResult,
   CommitResult,
+  GitContext,
+  UnsafeCommitFileApproval,
 } from "../types.ts";
 import { formatDisplayPath } from "../utils/display-path.ts";
 import { gatherGitContext, isKnownSecretPath, runGit, STATUS_PORCELAIN_ARGS } from "./context.ts";
@@ -37,6 +39,7 @@ export class CommitMeCommitError extends Error {
 export interface CreateCommitOptions extends CommitMeExecOptions {
   message: string;
   expectedStatusPorcelain?: string;
+  approveUnsafeCommitFiles?: UnsafeCommitFileApproval;
 }
 
 function isDeletionStatus(status: string): boolean {
@@ -86,17 +89,41 @@ export function findUnsafeCommitFiles(files: ChangedFile[]): ChangedFile[] {
   return [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path));
 }
 
-export function assertNoUnsafeCommitFiles(files: ChangedFile[]): void {
-  const unsafeFiles = findUnsafeCommitFiles(files);
-  if (unsafeFiles.length === 0) return;
-
+function createUnsafeCommitFilesError(unsafeFiles: ChangedFile[]): CommitMeCommitError {
   const displayedPaths = unsafeFiles.slice(0, 10).map((file) => formatDisplayPath(file.path)).join(", ");
   const omittedCount = unsafeFiles.length - 10;
   const suffix = omittedCount > 0 ? `, and ${omittedCount} more` : "";
-  throw new CommitMeCommitError(
+  return new CommitMeCommitError(
     `CommitMe refused to create a commit because known secret files or high-confidence secret tokens, or unreadable changed files, would be staged: ${displayedPaths}${suffix}. Remove them from the commit or commit them manually if intentional.`,
     { code: "unsafe-sensitive-files" },
   );
+}
+
+function createUnsafeCommitBlockedError(): CommitMeCommitError {
+  return new CommitMeCommitError("CommitMe blocked the commit because potentially unsafe changed files were not approved.", {
+    code: "unsafe-sensitive-files-blocked",
+  });
+}
+
+export function describeUnsafeCommitFileReason(file: ChangedFile): string {
+  if (file.unreadable) return "unreadable file";
+  if (file.secretContent) return "high-confidence secret-like content";
+  if (isKnownSecretPath(file.path)) return "known secret path";
+  return "potentially sensitive file";
+}
+
+export function assertNoUnsafeCommitFiles(files: ChangedFile[]): void {
+  const unsafeFiles = findUnsafeCommitFiles(files);
+  if (unsafeFiles.length === 0) return;
+  throw createUnsafeCommitFilesError(unsafeFiles);
+}
+
+async function assertUnsafeCommitFilesApproved(context: GitContext, approveUnsafeCommitFiles?: UnsafeCommitFileApproval): Promise<void> {
+  const unsafeFiles = findUnsafeCommitFiles(context.changedFiles);
+  if (unsafeFiles.length === 0) return;
+  if (!approveUnsafeCommitFiles) throw createUnsafeCommitFilesError(unsafeFiles);
+  if (await approveUnsafeCommitFiles({ files: unsafeFiles, context })) return;
+  throw createUnsafeCommitBlockedError();
 }
 
 function isMarkdownFenceOpening(line: string): boolean {
@@ -207,7 +234,7 @@ export async function createCommit(executor: CommitMeExecutor, options: CreateCo
   }
 
   const currentContext = await gatherGitContext(executor, commonOptions);
-  assertNoUnsafeCommitFiles(currentContext.changedFiles);
+  await assertUnsafeCommitFilesApproved(currentContext, options.approveUnsafeCommitFiles);
   await assertGitStatusUnchanged(executor, currentContext.statusPorcelain, commonOptions);
 
   const changedPathspecs = collectChangedFilePathspecs(currentContext.changedFiles);

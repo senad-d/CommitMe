@@ -4,9 +4,12 @@ import { COMMITME_COMMAND_NAME, EXTENSION_DISPLAY_NAME } from "../constants.ts";
 import type { DraftCommitMessageDependency } from "../model/draft-commit-message.ts";
 import type { CommitMeCommandOptions, CommitMeParseResult, CommitMeToolDetails } from "../types.ts";
 import { draftAndCreateCommit } from "../workflows/commitme-commit-flow.ts";
+import { createUnsafeCommitFileApproval } from "../workflows/unsafe-commit-approval.ts";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
 const HELP_COMMAND = "help";
+const STEERING_FLAG = "--steering";
+const STEERING_FLAG_PREFIX = "--steering=";
 
 export type { DraftCommitMessage } from "../model/draft-commit-message.ts";
 
@@ -73,6 +76,14 @@ function unknownFlagParseResult(token: CommitMeArgToken): CommitMeParseResult {
   };
 }
 
+function steeringFlagPrompt(raw: string, token: CommitMeArgToken): string {
+  if (token.text === STEERING_FLAG) return raw.slice(token.end).trim();
+
+  const inlinePrompt = token.text.slice(STEERING_FLAG_PREFIX.length);
+  const trailingPrompt = raw.slice(token.end).trim();
+  return [inlinePrompt, trailingPrompt].filter(Boolean).join(" ").trim();
+}
+
 function terminatingTokenParseResult(
   raw: string,
   rawArgs: string,
@@ -81,6 +92,9 @@ function terminatingTokenParseResult(
 ): CommitMeParseResult | undefined {
   if (token.text === "--") return commitParseResult(rawArgs, confirm, raw.slice(token.end).trim());
   if (HELP_FLAGS.has(token.lowerText)) return helpParseResult(rawArgs);
+  if (token.text === STEERING_FLAG || token.text.startsWith(STEERING_FLAG_PREFIX)) {
+    return commitParseResult(rawArgs, confirm, steeringFlagPrompt(raw, token));
+  }
   if (token.text.startsWith("-") && token.text !== "--commit" && token.text !== "--confirm") return unknownFlagParseResult(token);
   return undefined;
 }
@@ -152,8 +166,11 @@ export function buildCommitMeHelpText(): string {
     "### /commitme --confirm [steering prompt]",
     "Generates a one-line commit subject, shows a confirmation prompt with that subject, and commits only if you confirm.",
     "",
-    "### /commitme -- --steering that starts with a dash",
-    "Use `--` before steering text that begins with `-` or `--`.",
+    "### /commitme --steering <prompt>",
+    "Passes explicit steering text (`--steering=<prompt>` also works). This is equivalent to positional steering text and works with `--confirm`.",
+    "",
+    "### /commitme -- --prompt-that-starts-with-a-dash",
+    "Use `--` before positional steering text that begins with `-` or `--`.",
     "",
     "### /commitme help",
     "Shows this help panel. `/commitme --help` and `/commitme -h` work too.",
@@ -229,12 +246,14 @@ function buildWorkflowOptions(
   parsedOptions: CommitMeCommandOptions,
   options: RegisterCommitMeCommandOptions,
 ): CommitMeWorkflowOptions {
+  const approveUnsafeCommitFiles = createUnsafeCommitFileApproval(ctx);
   return {
     cwd: ctx.cwd,
     signal: ctx.signal,
     steeringPrompt: parsedOptions.steeringPrompt,
     draftContext: ctx,
     ...(options.draftCommitMessage ? { draftCommitMessage: options.draftCommitMessage } : {}),
+    ...(approveUnsafeCommitFiles ? { approveUnsafeCommitFiles } : {}),
     confirmCommit: (subject) => confirmCommitIfNeeded(ctx, subject, parsedOptions.confirm),
   };
 }
@@ -247,6 +266,11 @@ function handleWorkflowResult(pi: ExtensionAPI, ctx: ExtensionCommandContext, re
 
   if (result.status === "cancelled") {
     ctx.ui.notify(`${EXTENSION_DISPLAY_NAME}: commit cancelled.`, "info");
+    return;
+  }
+
+  if (result.status === "blocked") {
+    ctx.ui.notify(`${EXTENSION_DISPLAY_NAME}: commit blocked because potentially unsafe files were not approved.`, "warning");
     return;
   }
 
