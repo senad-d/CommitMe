@@ -178,7 +178,7 @@ test("commitme tool commit action creates a commit with an explicit message", as
   });
 });
 
-test("commitme tool message-less commit drafts and creates a commit", async () => {
+test("commitme tool message-less commit creates a commit without terminating the agent loop", async () => {
   await withTempRepo(async (dir) => {
     await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
 
@@ -194,7 +194,7 @@ test("commitme tool message-less commit drafts and creates a commit", async () =
 
     assert.equal(result.content[0].text, `Committed ${result.details.committed.commitHash}: feat: add feature module`);
     assert.doesNotMatch(result.content[0].text, /REPOSITORY CONTEXT|Return only one Lightweight/);
-    assert.equal(result.terminate, true);
+    assert.equal(result.terminate, undefined);
     assert.equal(result.details.action, "commit");
     assert.equal(result.details.committed.subject, "feat: add feature module");
     assert.deepEqual(result.details.draft, []);
@@ -240,7 +240,7 @@ test("commitme tool message-less commit includes steering and draft diagnostics 
     );
 
     assert.match(result.content[0].text, /Committed/);
-    assert.equal(result.terminate, true);
+    assert.equal(result.terminate, undefined);
     assert.equal(result.details.steeringPrompt, "prefer command parity wording");
     assert.equal(result.details.prompt.truncationCount >= 0, true);
     assert.deepEqual(result.details.draft, attempts);
@@ -258,7 +258,7 @@ test("commitme tool message-less commit returns no-changes without drafting or s
     const result = await tool.execute("tool-call", { action: "commit" }, undefined, undefined, { cwd: dir, hasUI: false });
 
     assert.equal(result.content[0].text, "No staged or unstaged git changes found; no commit was created.");
-    assert.equal(result.terminate, true);
+    assert.equal(result.terminate, undefined);
     assert.equal(result.details.action, "commit");
     assert.equal(result.details.hasChanges, false);
     assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
@@ -293,7 +293,7 @@ test("commitme tool message-less commit asks confirmation after drafting the exa
     const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
 
     assert.equal(result.content[0].text, "CommitMe commit cancelled; no git mutation was performed.");
-    assert.equal(result.terminate, true);
+    assert.equal(result.terminate, undefined);
     assert.equal(confirmations.length, 1);
     assert.match(confirmations[0].body, /feat: add feature module/);
     assert.match(stdout, /\?\? feature\.ts/);
@@ -411,6 +411,29 @@ test("commitme tool message-less commit refuses sensitive files before drafting"
     const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
 
     assert.match(stdout, /\?\? \.env/);
+    assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
+  });
+});
+
+test("commitme tool blocked commit leaves the agent loop active", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, ".env"), "TOKEN=do-not-commit\n", "utf8");
+
+    const calls = [];
+    const tool = createCommitMeTool(createExecutor(calls), {
+      draftCommitMessage: async () => "chore: add environment fixture",
+    });
+    const result = await tool.execute(
+      "tool-call",
+      { action: "commit" },
+      undefined,
+      undefined,
+      { cwd: dir, hasUI: true, ui: { confirm: async () => false } },
+    );
+
+    assert.equal(result.content[0].text, "CommitMe commit blocked because potentially unsafe files were not approved.");
+    assert.equal(result.terminate, undefined);
+    assert.equal(result.details.action, "commit");
     assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
   });
 });

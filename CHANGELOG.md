@@ -2,10 +2,11 @@
 
 ## Unreleased
 
+- Fixed `commitme action="commit"` results to return control to the agent so requested follow-up tools can run after a local commit.
 - Added UI approval prompts for flagged unsafe changed files so users can commit reviewed safe fixtures/placeholders or block the commit before staging.
 - Added a user-visible UI fixture test that captures command help, dialogs, notifications, safety copy, and representative output.
 - Added `/commitme --steering <prompt>` and `/commitme --steering=<prompt>` parsing for explicit command steering while preserving positional steering.
-- Added message-less `commitme action="commit"` tool parity with `/commitme`, including active-model drafting, optional confirmation, local commit creation, and terminating no-op/cancel/success results.
+- Added message-less `commitme action="commit"` tool parity with `/commitme`, including active-model drafting, optional confirmation, local commit creation, and concise no-op/cancel/success results.
 - Refused unreadable changed files before staging so CommitMe does not auto-commit content it cannot scan for high-confidence secret tokens.
 - Escaped control characters in unsafe-path refusal messages to avoid malformed terminal output from unusual filenames.
 - Prevented changed paths reached through symlinked directories from reading content outside the repository into model context.

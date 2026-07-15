@@ -34,8 +34,8 @@ The updated `commitme` tool should:
 - Reuse existing context gathering, prompt budgeting, sensitive-file refusal, message validation, status-change checks, and commit execution.
 - Decision: message-less commit mode returns only final outcome content, not the full draft prompt; prompt diagnostics/truncation and safe draft attempt diagnostics belong in structured `details`.
 - Run with `executionMode: "sequential"`.
-- Return `terminate: true` for committed, cancelled, and no-changes outcomes in the draft-and-commit path.
-- Do not return `terminate: true` for thrown-error outcomes.
+- Do not return `terminate: true` from commit outcomes; return control to the agent so it can continue any remaining user-requested workflow steps.
+- Keep thrown-error outcomes available to the agent so it can explain or recover.
 - Never push.
 
 Do not implement command parity by queuing `/commitme` through `pi.sendUserMessage()`. The tool should return its own result and errors directly.
@@ -77,8 +77,8 @@ Use these files to complete the task:
 - Keep `executionMode: "sequential"`.
 - Call the shared workflow when `action === "commit"` and `message` is omitted.
 - Keep the existing explicit-message commit implementation when `message` is provided, or route it through a shared helper without changing behavior.
-- Decision: return `terminate: true` only for the new message-less draft-and-commit path; do not change explicit-message commit loop behavior in this feature.
-- Map workflow outcomes to concise tool content and structured details, with `terminate: true` on non-error draft-and-commit outcomes.
+- Decision: keep both message-less and explicit-message commit results non-terminating so the agent loop can continue after the local commit.
+- Map workflow outcomes to concise tool content and structured details without requesting early termination.
 
 ### Phase 3: Tests, docs, and polish
 - Add temporary-git-repo tests for draft-and-commit success, confirmation, cancellation, no changes, unsafe files, invalid drafts, and status-change protection.
@@ -160,14 +160,14 @@ For commit attempts, `details.action` should be `"commit"` even when the outcome
 - For message-less commit mode, include `steeringPrompt` in the bounded prompt and `details` when provided.
 - For explicit-message commit mode, ignore `steeringPrompt` for behavior; do not alter the provided final `message`.
 - Return concise final-outcome content only; do not include the full draft prompt in message-less commit output.
-- Decision: no-changes in message-less commit mode is a successful no-op tool result with `terminate: true`, not a thrown error.
+- Decision: no-changes in message-less commit mode is a successful, non-terminating no-op tool result, not a thrown error.
 - Return content examples:
   - success: `Committed <hash>: <subject>`
   - cancelled: `CommitMe commit cancelled; no git mutation was performed.`
   - no changes: `No staged or unstaged git changes found; no commit was created.`
 - Return structured details from `createCommitMeDetails(...)`, including prompt/truncation metadata and safe `draft` attempt diagnostics on drafted paths.
-- Return `terminate: true` for committed, cancelled, and no-changes outcomes in message-less commit mode.
-- Do not return `terminate: true` for thrown-error outcomes; unsafe files, invalid drafts, git failures, and other errors should remain normal tool errors so the agent can explain or recover.
+- Do not return `terminate: true` for committed, cancelled, blocked, or no-changes outcomes in message-less commit mode; the agent may need to continue a larger requested workflow.
+- Unsafe files, invalid drafts, git failures, and other errors should remain normal tool errors so the agent can explain or recover.
 
 ### 6. Update `commitme` prompt metadata
 - Update the tool description to distinguish:
@@ -210,7 +210,7 @@ For commit attempts, `details.action` should be `"commit"` even when the outcome
   - still commits without a model when `message` is provided and valid
   - cancels without staging/committing when confirmation is denied
   - aborts before staging when git status changes after drafting
-  - returns `terminate: true` for success/cancel/no-changes
+  - leaves `terminate` unset for success/cancel/no-changes so the agent loop continues
 - Rerun existing command and `commitme` explicit-message tests to ensure refactor did not change behavior.
 
 ### 9. Update documentation
@@ -253,8 +253,8 @@ Key test groups:
 - Message-less commit mode defaults to no confirmation, matching `/commitme`; `confirm: true` is opt-in.
 - Message-less commit mode returns only final outcome content and puts prompt diagnostics/truncation plus safe draft attempt diagnostics in `details`.
 - Message-less commit mode treats no-changes as a successful no-op result rather than an error.
-- Message-less commit mode returns `terminate: true` for committed, cancelled, and no-changes outcomes.
-- Explicit-message commit mode does not gain `terminate: true` in this feature.
+- Message-less commit mode leaves `terminate` unset for committed, cancelled, blocked, and no-changes outcomes.
+- Explicit-message commit mode also remains non-terminating.
 - Existing `/commitme` user-facing behavior is unchanged; structured details may gain safe draft diagnostics.
 - Commit safety protections remain in force: no unsafe files, no invalid subjects, no status drift, no push.
 - New and existing tests pass.

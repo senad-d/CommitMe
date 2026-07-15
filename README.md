@@ -200,7 +200,9 @@ CommitMe also registers a `commitme` tool for agents.
 | `action: "commit", message: "..."` | Uses the provided final one-line subject, stages gathered changed paths, and creates a local commit. This path does not need an active model. |
 | `action: "commit"` without `message` | One-shot `/commitme` parity path. Gathers context, drafts with the active pi model, validates the subject, optionally confirms when `confirm: true`, stages gathered changed paths, and creates a local commit. Accepts optional `steeringPrompt`. |
 
-Use `action: "gather"` when you want pi to draft a message without immediately committing, or when another workflow needs bounded git context. Use `action: "commit"` only when you explicitly want a local git commit. 
+Use `action: "gather"` when you want pi to draft a message without immediately committing, or when another workflow needs bounded git context. Use `action: "commit"` only when you explicitly want a local git commit.
+
+The `commitme` tool returns control to the agent after every outcome instead of terminating the agent loop. Multi-step requests such as “commit and push” can therefore continue with a dedicated push tool after CommitMe creates the local commit. CommitMe itself never pushes.
 
 ---
 

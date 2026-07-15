@@ -75,27 +75,24 @@ async function confirmCommit(ctx: ExtensionContext, message: string, confirm: bo
   return ctx.ui.confirm("CommitMe: create commit?", `Commit with this message?\n\n${message}`);
 }
 
-function cancelledCommitResult(context: GitContext, terminate?: true): CommitMeToolResult {
+function cancelledCommitResult(context: GitContext): CommitMeToolResult {
   return {
     content: [{ type: "text", text: "CommitMe commit cancelled; no git mutation was performed." }],
     details: createCommitMeDetails("commit", context),
-    ...(terminate ? { terminate } : {}),
   };
 }
 
-function committedResult(context: GitContext, committed: CommitResult, terminate?: true): CommitMeToolResult {
+function committedResult(context: GitContext, committed: CommitResult): CommitMeToolResult {
   return {
     content: [{ type: "text", text: `Committed ${committed.commitHash}: ${committed.subject}` }],
     details: createCommitMeDetails("commit", context, { committed }),
-    ...(terminate ? { terminate } : {}),
   };
 }
 
-function blockedCommitResult(context: GitContext, terminate?: true): CommitMeToolResult {
+function blockedCommitResult(context: GitContext): CommitMeToolResult {
   return {
     content: [{ type: "text", text: "CommitMe commit blocked because potentially unsafe files were not approved." }],
     details: createCommitMeDetails("commit", context),
-    ...(terminate ? { terminate } : {}),
   };
 }
 
@@ -104,7 +101,6 @@ function draftedCommitResult(result: DraftedCommitResult): CommitMeToolResult {
     return {
       content: [{ type: "text", text: "No staged or unstaged git changes found; no commit was created." }],
       details: result.details,
-      terminate: true,
     };
   }
 
@@ -112,7 +108,6 @@ function draftedCommitResult(result: DraftedCommitResult): CommitMeToolResult {
     return {
       content: [{ type: "text", text: "CommitMe commit cancelled; no git mutation was performed." }],
       details: result.details,
-      terminate: true,
     };
   }
 
@@ -120,14 +115,12 @@ function draftedCommitResult(result: DraftedCommitResult): CommitMeToolResult {
     return {
       content: [{ type: "text", text: "CommitMe commit blocked because potentially unsafe files were not approved." }],
       details: result.details,
-      terminate: true,
     };
   }
 
   return {
     content: [{ type: "text", text: `Committed ${result.committed.commitHash}: ${result.committed.subject}` }],
     details: result.details,
-    terminate: true,
   };
 }
 
@@ -224,6 +217,7 @@ export function createCommitMeTool(pi: ExtensionAPI, options: CreateCommitMeTool
       "Pass user wording or scope guidance as commitme steeringPrompt when it matches the requested commit.",
       "Set commitme confirm=true only when the user asks to review or confirm before committing.",
       "Use commitme in same-turn edit-and-commit flows only when the user explicitly requested that end-to-end workflow.",
+      "After commitme action=commit returns, continue any remaining user-requested workflow steps with the appropriate tools.",
       "Tell users that /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] or /commitme --steering guides drafting, and /commitme help shows usage when they ask how to run CommitMe.",
     ],
     parameters: CommitMeToolParameters,

@@ -47,6 +47,7 @@ src/
 - Each `promptGuidelines` bullet names the `commitme` tool.
 - String action enums use `StringEnum` from `@earendil-works/pi-ai`.
 - Large outputs are truncated before reaching the model.
+- Tool commit outcomes return control to the agent so multi-step workflows can continue with other tools.
 - Pi core packages remain in `peerDependencies` with `"*"`.
 
 ## Security-sensitive areas
