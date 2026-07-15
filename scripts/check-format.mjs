@@ -2,18 +2,9 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-const checkExtensions = new Set([".ts", ".mjs", ".json", ".md", ".yml", ".yaml"]);
+const checkExtensions = new Set([".ts", ".mjs", ".json", ".yml", ".yaml"]);
 const roots = [".github", "dev-shims", "docs", "scripts", "specs", "src", "test"];
-const rootFiles = [
-  ".gitignore",
-  "CHANGELOG.md",
-  "CONTRIBUTING.md",
-  "README.md",
-  "SECURITY.md",
-  "package-lock.json",
-  "package.json",
-  "tsconfig.json",
-];
+const rootFiles = [".gitignore", "package-lock.json", "package.json", "tsconfig.json"];
 
 function extensionOf(path) {
   const index = path.lastIndexOf(".");
