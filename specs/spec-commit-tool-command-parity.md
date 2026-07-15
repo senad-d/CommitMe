@@ -182,7 +182,6 @@ For commit attempts, `details.action` should be `"commit"` even when the outcome
   - `Pass user wording or scope guidance as commitme steeringPrompt when it matches the requested commit.`
   - `Set commitme confirm=true only when the user asks to review/confirm before committing.`
   - `Commitme may be used in same-turn edit-and-commit flows only when the user explicitly requested that end-to-end workflow.`
-  - `Commitme never pushes.`
 
 ### 7. Keep existing behavior stable
 - Preserve `commitme action="gather"` as the read-only path.

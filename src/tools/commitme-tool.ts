@@ -213,7 +213,7 @@ export function createCommitMeTool(pi: ExtensionAPI, options: CreateCommitMeTool
     name: COMMITME_TOOL_NAME,
     label: EXTENSION_DISPLAY_NAME,
     description:
-      "CommitMe gathers local git diff and project context or creates local commits. Slash usage: /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] or /commitme --steering guides drafting, and /commitme help shows help. Tool usage: action=gather is read-only; action=commit with message uses an explicit final subject; action=commit without message drafts and commits like /commitme. CommitMe never pushes.",
+      "CommitMe gathers local git diff and project context or creates local commits. Slash usage: /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] or /commitme --steering guides drafting, and /commitme help shows help. Tool usage: action=gather is read-only; action=commit with message uses an explicit final subject; action=commit without message drafts and commits like /commitme.",
     promptSnippet: "Gather local git changes and project context for a one-line Lightweight Conventional Commit subject",
     promptGuidelines: [
       "Use commitme action=gather when the user asks for a commit message but not a commit.",
@@ -224,7 +224,6 @@ export function createCommitMeTool(pi: ExtensionAPI, options: CreateCommitMeTool
       "Pass user wording or scope guidance as commitme steeringPrompt when it matches the requested commit.",
       "Set commitme confirm=true only when the user asks to review or confirm before committing.",
       "Use commitme in same-turn edit-and-commit flows only when the user explicitly requested that end-to-end workflow.",
-      "Remember commitme never pushes.",
       "Tell users that /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] or /commitme --steering guides drafting, and /commitme help shows usage when they ask how to run CommitMe.",
     ],
     parameters: CommitMeToolParameters,

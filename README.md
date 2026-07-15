@@ -75,7 +75,7 @@ When you are comfortable with the workflow, run the fast path:
 /commitme focus the message on the command steering support
 ```
 
-CommitMe will gather the current repository changes, ask your active pi model for a one-line Lightweight Conventional Commit subject, stage the gathered changed paths, and create a local commit. Optional steering text after the command guides the model when it matches the actual git changes. CommitMe never pushes.
+CommitMe will gather the current repository changes, ask your active pi model for a one-line Lightweight Conventional Commit subject, stage the gathered changed paths, and create a local commit. Optional steering text after the command guides the model when it matches the actual git changes.
 
 ---
 
@@ -200,7 +200,7 @@ CommitMe also registers a `commitme` tool for agents.
 | `action: "commit", message: "..."` | Uses the provided final one-line subject, stages gathered changed paths, and creates a local commit. This path does not need an active model. |
 | `action: "commit"` without `message` | One-shot `/commitme` parity path. Gathers context, drafts with the active pi model, validates the subject, optionally confirms when `confirm: true`, stages gathered changed paths, and creates a local commit. Accepts optional `steeringPrompt`. |
 
-Use `action: "gather"` when you want pi to draft a message without immediately committing, or when another workflow needs bounded git context. Use `action: "commit"` only when you explicitly want a local git commit. CommitMe never pushes.
+Use `action: "gather"` when you want pi to draft a message without immediately committing, or when another workflow needs bounded git context. Use `action: "commit"` only when you explicitly want a local git commit. 
 
 ---
 
