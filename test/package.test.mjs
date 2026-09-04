@@ -50,10 +50,10 @@ test("development shim metadata uses CommitMe naming", async () => {
 });
 
 test("required preparation specs exist", async () => {
-  await access(new URL("../docs/PROJECT_DEFINITION_BRIEF.md", import.meta.url));
-  await access(new URL("../specs/spec-architecture.md", import.meta.url));
-  await access(new URL("../specs/spec-guidelines.md", import.meta.url));
-  await access(new URL("../specs/spec-tasks.md", import.meta.url));
+  await assert.doesNotReject(access(new URL("../docs/PROJECT_DEFINITION_BRIEF.md", import.meta.url)));
+  await assert.doesNotReject(access(new URL("../specs/spec-architecture.md", import.meta.url)));
+  await assert.doesNotReject(access(new URL("../specs/spec-guidelines.md", import.meta.url)));
+  await assert.doesNotReject(access(new URL("../specs/spec-tasks.md", import.meta.url)));
 });
 
 test("task spec tracks implementation progress", async () => {

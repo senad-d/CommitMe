@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added an optional `paths` allowlist to `commitme action="commit"` so agents can stage and commit only approved repo-relative paths, refusing listed paths without changes and staged changes outside the list; `steeringPrompt` guides message wording only and never scopes paths.
 - Fixed `commitme action="commit"` results to return control to the agent so requested follow-up tools can run after a local commit.
 - Added UI approval prompts for flagged unsafe changed files so users can commit reviewed safe fixtures/placeholders or block the commit before staging.
 - Added a user-visible UI fixture test that captures command help, dialogs, notifications, safety copy, and representative output.

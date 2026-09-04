@@ -256,6 +256,87 @@ test("createCommit stages gathered paths without adding late unscanned files", a
   });
 });
 
+test("createCommit with paths commits only the listed paths", async () => {
+  await withTempRepo(async (dir) => {
+    const calls = [];
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+    await writeFile(join(dir, "notes.md"), "# Notes\n", "utf8");
+
+    await createCommit(createExecutor(calls), { cwd: dir, message: "feat: add feature module", paths: ["feature.ts"] });
+    const { stdout: committedFiles } = await execFileAsync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd: dir });
+    const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+
+    assert.match(committedFiles, /feature\.ts/);
+    assert.doesNotMatch(committedFiles, /notes\.md/);
+    assert.match(status, /\?\? notes\.md/);
+    assert.ok(calls.some((call) => call.args[0] === "add" && call.args.includes("feature.ts") && !call.args.includes("notes.md")));
+  });
+});
+
+test("createCommit with paths stages listed deletions and renames like unscoped commits", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, "old-name.txt"), "rename fixture\n", "utf8");
+    await writeFile(join(dir, "obsolete.txt"), "obsolete fixture\n", "utf8");
+    await execFileAsync("git", ["add", "old-name.txt", "obsolete.txt"], { cwd: dir });
+    await execFileAsync("git", ["commit", "-m", "chore: add scoped fixtures"], { cwd: dir });
+    await execFileAsync("git", ["mv", "old-name.txt", "new-name.txt"], { cwd: dir });
+    await rm(join(dir, "obsolete.txt"));
+    await writeFile(join(dir, "notes.md"), "# Notes\n", "utf8");
+
+    await createCommit(createExecutor(), {
+      cwd: dir,
+      message: "chore: apply scoped rename and deletion",
+      paths: ["new-name.txt", "obsolete.txt"],
+    });
+    const { stdout: committedFiles } = await execFileAsync("git", ["show", "--name-status", "--format=", "HEAD"], { cwd: dir });
+    const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+
+    assert.match(committedFiles, /R\d+\s+old-name\.txt\s+new-name\.txt/);
+    assert.match(committedFiles, /D\s+obsolete\.txt/);
+    assert.doesNotMatch(committedFiles, /notes\.md/);
+    assert.match(status, /\?\? notes\.md/);
+  });
+});
+
+test("createCommit with paths refuses empty and unmatched path lists before staging", async () => {
+  await withTempRepo(async (dir) => {
+    const calls = [];
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+
+    await assert.rejects(
+      () => createCommit(createExecutor(calls), { cwd: dir, message: "feat: add feature module", paths: [] }),
+      (error) => error instanceof CommitMeCommitError && error.code === "invalid-paths",
+    );
+    await assert.rejects(
+      () => createCommit(createExecutor(calls), { cwd: dir, message: "feat: add feature module", paths: ["feature.ts", "missing.ts"] }),
+      (error) => error instanceof CommitMeCommitError && error.code === "paths-not-changed" && /missing\.ts/.test(error.message),
+    );
+
+    assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
+    const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+    assert.match(status, /\?\? feature\.ts/);
+  });
+});
+
+test("createCommit with paths refuses staged changes outside the listed paths", async () => {
+  await withTempRepo(async (dir) => {
+    const calls = [];
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+    await writeFile(join(dir, "staged.ts"), "export const staged = true;\n", "utf8");
+    await execFileAsync("git", ["add", "staged.ts"], { cwd: dir });
+
+    await assert.rejects(
+      () => createCommit(createExecutor(calls), { cwd: dir, message: "feat: add feature module", paths: ["feature.ts"] }),
+      (error) => error instanceof CommitMeCommitError && error.code === "unlisted-staged-changes" && /staged\.ts/.test(error.message),
+    );
+
+    assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
+    const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+    assert.match(status, /A  staged\.ts/);
+    assert.match(status, /\?\? feature\.ts/);
+  });
+});
+
 test("createCommit stages rename sources and destinations", async () => {
   await withTempRepo(async (dir) => {
     await writeFile(join(dir, "old-name.txt"), "rename fixture\n", "utf8");

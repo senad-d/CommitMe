@@ -63,6 +63,7 @@ test("registerCommitMeTool registers the commitme tool", () => {
   assert.match(JSON.stringify(registered[0].parameters), /gather/);
   assert.match(JSON.stringify(registered[0].parameters), /commit/);
   assert.match(JSON.stringify(registered[0].parameters), /steeringPrompt/);
+  assert.match(JSON.stringify(registered[0].parameters), /paths/);
 });
 
 test("commitme tool gathers compact context with structured details", async () => {
@@ -175,6 +176,75 @@ test("commitme tool commit action creates a commit with an explicit message", as
     assert.equal(result.details.steeringPrompt, undefined);
     assert.equal(result.details.committed.subject, "feat: add feature module");
     assert.equal(stdout.trim(), "feat: add feature module");
+  });
+});
+
+test("commitme tool commit action with paths commits only the listed paths", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+    await writeFile(join(dir, "notes.md"), "# Notes\n", "utf8");
+
+    const tool = createCommitMeTool(createExecutor());
+    const result = await tool.execute(
+      "tool-call",
+      { action: "commit", message: "feat: add feature module", paths: ["feature.ts"] },
+      undefined,
+      undefined,
+      { cwd: dir, hasUI: false },
+    );
+    const { stdout: committedFiles } = await execFileAsync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd: dir });
+    const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+
+    assert.match(result.content[0].text, /Committed/);
+    assert.match(committedFiles, /feature\.ts/);
+    assert.doesNotMatch(committedFiles, /notes\.md/);
+    assert.match(status, /\?\? notes\.md/);
+  });
+});
+
+test("commitme tool message-less commit with paths commits only the listed paths despite steering text", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+    await writeFile(join(dir, "notes.md"), "# Notes\n", "utf8");
+
+    const tool = createCommitMeTool(createExecutor(), {
+      draftCommitMessage: async () => "feat: add feature module",
+    });
+    const result = await tool.execute(
+      "tool-call",
+      { action: "commit", steeringPrompt: "Approved exact paths only: feature.ts. Do not include notes.md.", paths: ["feature.ts"] },
+      undefined,
+      undefined,
+      { cwd: dir, hasUI: false },
+    );
+    const { stdout: committedFiles } = await execFileAsync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd: dir });
+    const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+
+    assert.match(result.content[0].text, /Committed/);
+    assert.match(committedFiles, /feature\.ts/);
+    assert.doesNotMatch(committedFiles, /notes\.md/);
+    assert.match(status, /\?\? notes\.md/);
+  });
+});
+
+test("commitme tool message-less commit with unmatched paths fails before drafting or staging", async () => {
+  await withTempRepo(async (dir) => {
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+
+    const calls = [];
+    const tool = createCommitMeTool(createExecutor(calls), {
+      draftCommitMessage: async () => {
+        throw new Error("drafting should not run when listed paths have no changes");
+      },
+    });
+    await assert.rejects(
+      () => tool.execute("tool-call", { action: "commit", paths: ["missing.ts"] }, undefined, undefined, { cwd: dir, hasUI: false }),
+      /listed paths have no changes/,
+    );
+    const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+
+    assert.match(status, /\?\? feature\.ts/);
+    assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
   });
 });
 

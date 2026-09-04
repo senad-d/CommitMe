@@ -4,7 +4,7 @@ import { Type, type Static } from "typebox";
 
 import { collectGitContextTruncation, createCommitMeDetails } from "../commitme-details.ts";
 import { COMMITME_TOOL_NAME, EXTENSION_DISPLAY_NAME } from "../constants.ts";
-import { CommitMeCommitError, assertNoUnsafeCommitFiles, createCommit, validateCommitMessage } from "../git/commit.ts";
+import { CommitMeCommitError, assertNoUnsafeCommitFiles, createCommit, scopeChangedFilesToPaths, validateCommitMessage } from "../git/commit.ts";
 import { gatherGitContext } from "../git/context.ts";
 import type { DraftCommitMessageDependency } from "../model/draft-commit-message.ts";
 import { buildBoundedCommitPrompt } from "../prompt/build-commit-prompt.ts";
@@ -28,7 +28,16 @@ export const CommitMeToolParameters = Type.Object({
     }),
   ),
   steeringPrompt: Type.Optional(
-    Type.String({ description: "Optional user guidance to include in gather prompts and message-less commit drafting prompts." }),
+    Type.String({
+      description:
+        "Optional user guidance to include in gather prompts and message-less commit drafting prompts. Guides message wording only; it never limits which paths are staged or committed. Use paths for that.",
+    }),
+  ),
+  paths: Type.Optional(
+    Type.Array(Type.String(), {
+      description:
+        "With action=commit, an allowlist of exact repo-relative paths to stage and commit. Only listed paths enter the commit; CommitMe refuses when a listed path has no changes or when staged changes outside the list would be committed. When omitted, all changed paths are committed.",
+    }),
   ),
   confirm: Type.Optional(Type.Boolean({ description: "Ask before creating the local commit when UI is available." })),
 });
@@ -129,8 +138,9 @@ async function executeExplicitCommit(runtime: CommitMeToolRuntime): Promise<Comm
   requireConfirmationUi(runtime.ctx, runtime.params.confirm);
 
   const context = await gatherGitContext(runtime.pi, { cwd: runtime.ctx.cwd, signal: runtime.signal });
+  const scopedFiles = runtime.params.paths ? scopeChangedFilesToPaths(context.changedFiles, runtime.params.paths) : context.changedFiles;
   const approveUnsafeCommitFiles = createUnsafeCommitFileApproval(runtime.ctx);
-  if (!approveUnsafeCommitFiles) assertNoUnsafeCommitFiles(context.changedFiles);
+  if (!approveUnsafeCommitFiles) assertNoUnsafeCommitFiles(scopedFiles);
 
   if (!(await confirmCommit(runtime.ctx, message, runtime.params.confirm))) {
     return cancelledCommitResult(context);
@@ -141,6 +151,7 @@ async function executeExplicitCommit(runtime: CommitMeToolRuntime): Promise<Comm
       cwd: runtime.ctx.cwd,
       signal: runtime.signal,
       message,
+      paths: runtime.params.paths,
       expectedStatusPorcelain: context.statusPorcelain,
       approveUnsafeCommitFiles,
     });
@@ -161,6 +172,7 @@ async function executeDraftedCommit(runtime: CommitMeToolRuntime): Promise<Commi
     cwd: runtime.ctx.cwd,
     signal: runtime.signal,
     steeringPrompt: runtime.params.steeringPrompt,
+    paths: runtime.params.paths,
     draftContext: { model: runtime.ctx.model, modelRegistry: runtime.ctx.modelRegistry, signal: runtime.signal },
     ...(runtime.options.draftCommitMessage ? { draftCommitMessage: runtime.options.draftCommitMessage } : {}),
     ...(approveUnsafeCommitFiles ? { approveUnsafeCommitFiles } : {}),
@@ -206,7 +218,7 @@ export function createCommitMeTool(pi: ExtensionAPI, options: CreateCommitMeTool
     name: COMMITME_TOOL_NAME,
     label: EXTENSION_DISPLAY_NAME,
     description:
-      "CommitMe gathers local git diff and project context or creates local commits. Slash usage: /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] or /commitme --steering guides drafting, and /commitme help shows help. Tool usage: action=gather is read-only; action=commit with message uses an explicit final subject; action=commit without message drafts and commits like /commitme.",
+      "CommitMe gathers local git diff and project context or creates local commits. Slash usage: /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] or /commitme --steering guides drafting, and /commitme help shows help. Tool usage: action=gather is read-only; action=commit with message uses an explicit final subject; action=commit without message drafts and commits like /commitme; action=commit with paths stages and commits only the listed repo-relative paths.",
     promptSnippet: "Gather local git changes and project context for a one-line Lightweight Conventional Commit subject",
     promptGuidelines: [
       "Use commitme action=gather when the user asks for a commit message but not a commit.",
@@ -215,6 +227,7 @@ export function createCommitMeTool(pi: ExtensionAPI, options: CreateCommitMeTool
       "Use commitme action=commit with message only when a final one-line subject has already been selected.",
       "After commitme action=gather returns context, draft exactly one Lightweight Conventional Commit subject line unless the user asks otherwise.",
       "Pass user wording or scope guidance as commitme steeringPrompt when it matches the requested commit.",
+      "Pass commitme paths with the exact approved repo-relative paths when a commit must include only specific files; steeringPrompt text never limits which paths are staged or committed.",
       "Set commitme confirm=true only when the user asks to review or confirm before committing.",
       "Use commitme in same-turn edit-and-commit flows only when the user explicitly requested that end-to-end workflow.",
       "After commitme action=commit returns, continue any remaining user-requested workflow steps with the appropriate tools.",

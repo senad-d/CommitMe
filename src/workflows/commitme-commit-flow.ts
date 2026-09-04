@@ -1,5 +1,5 @@
 import { collectGitContextTruncation, createCommitMeDetails } from "../commitme-details.ts";
-import { CommitMeCommitError, assertNoUnsafeCommitFiles, createCommit, validateCommitMessage } from "../git/commit.ts";
+import { CommitMeCommitError, assertNoUnsafeCommitFiles, createCommit, scopeChangedFilesToPaths, validateCommitMessage } from "../git/commit.ts";
 import { gatherGitContext } from "../git/context.ts";
 import {
   draftCommitMessageWithActiveModelDiagnostics,
@@ -21,6 +21,7 @@ export interface DraftAndCreateCommitOptions {
   cwd?: string;
   signal?: AbortSignal;
   steeringPrompt?: string;
+  paths?: string[];
   draftContext: DraftCommitMessageContext;
   draftCommitMessage?: DraftCommitMessageDependency;
   confirmCommit?: (subject: string) => Promise<boolean>;
@@ -96,7 +97,8 @@ export async function draftAndCreateCommit(
     };
   }
 
-  if (!options.approveUnsafeCommitFiles) assertNoUnsafeCommitFiles(context.changedFiles);
+  const scopedFiles = options.paths ? scopeChangedFilesToPaths(context.changedFiles, options.paths) : context.changedFiles;
+  if (!options.approveUnsafeCommitFiles) assertNoUnsafeCommitFiles(scopedFiles);
 
   const prompt = buildBoundedCommitPrompt(context, {
     steeringPrompt: options.steeringPrompt,
@@ -127,6 +129,7 @@ export async function draftAndCreateCommit(
       cwd: options.cwd,
       signal: options.signal,
       message: validation.subject,
+      paths: options.paths,
       expectedStatusPorcelain: context.statusPorcelain,
       approveUnsafeCommitFiles: options.approveUnsafeCommitFiles,
     });

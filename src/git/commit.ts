@@ -38,6 +38,7 @@ export class CommitMeCommitError extends Error {
 
 export interface CreateCommitOptions extends CommitMeExecOptions {
   message: string;
+  paths?: string[];
   expectedStatusPorcelain?: string;
   approveUnsafeCommitFiles?: UnsafeCommitFileApproval;
 }
@@ -64,6 +65,34 @@ function collectChangedFilePathspecs(files: ChangedFile[]): { add: string[]; rem
     add: [...add].sort((a, b) => a.localeCompare(b)),
     remove: [...remove].sort((a, b) => a.localeCompare(b)),
   };
+}
+
+export function scopeChangedFilesToPaths(files: ChangedFile[], paths: string[]): ChangedFile[] {
+  if (paths.length === 0) {
+    throw new CommitMeCommitError("CommitMe requires at least one repo-relative path when paths is provided.", { code: "invalid-paths" });
+  }
+
+  const listed = new Set(paths);
+  const changedPaths = new Set(files.map((file) => file.path));
+  const missing = [...listed].filter((path) => !changedPaths.has(path)).sort((a, b) => a.localeCompare(b));
+  if (missing.length > 0) {
+    throw new CommitMeCommitError(
+      `CommitMe refused to create a commit because listed paths have no changes: ${missing.map(formatDisplayPath).join(", ")}. Use exact repo-relative paths from git status.`,
+      { code: "paths-not-changed" },
+    );
+  }
+
+  const leaked = [...new Set(files.filter((file) => file.scope === "staged" && !listed.has(file.path)).map((file) => file.path))].sort(
+    (a, b) => a.localeCompare(b),
+  );
+  if (leaked.length > 0) {
+    throw new CommitMeCommitError(
+      `CommitMe refused to create a commit because staged changes outside the listed paths would be committed: ${leaked.map(formatDisplayPath).join(", ")}. List them in paths or unstage them first.`,
+      { code: "unlisted-staged-changes" },
+    );
+  }
+
+  return files.filter((file) => listed.has(file.path));
 }
 
 async function assertGitStatusUnchanged(
@@ -118,8 +147,12 @@ export function assertNoUnsafeCommitFiles(files: ChangedFile[]): void {
   throw createUnsafeCommitFilesError(unsafeFiles);
 }
 
-async function assertUnsafeCommitFilesApproved(context: GitContext, approveUnsafeCommitFiles?: UnsafeCommitFileApproval): Promise<void> {
-  const unsafeFiles = findUnsafeCommitFiles(context.changedFiles);
+async function assertUnsafeCommitFilesApproved(
+  context: GitContext,
+  files: ChangedFile[],
+  approveUnsafeCommitFiles?: UnsafeCommitFileApproval,
+): Promise<void> {
+  const unsafeFiles = findUnsafeCommitFiles(files);
   if (unsafeFiles.length === 0) return;
   if (!approveUnsafeCommitFiles) throw createUnsafeCommitFilesError(unsafeFiles);
   if (await approveUnsafeCommitFiles({ files: unsafeFiles, context })) return;
@@ -234,10 +267,11 @@ export async function createCommit(executor: CommitMeExecutor, options: CreateCo
   }
 
   const currentContext = await gatherGitContext(executor, commonOptions);
-  await assertUnsafeCommitFilesApproved(currentContext, options.approveUnsafeCommitFiles);
+  const scopedFiles = options.paths ? scopeChangedFilesToPaths(currentContext.changedFiles, options.paths) : currentContext.changedFiles;
+  await assertUnsafeCommitFilesApproved(currentContext, scopedFiles, options.approveUnsafeCommitFiles);
   await assertGitStatusUnchanged(executor, currentContext.statusPorcelain, commonOptions);
 
-  const changedPathspecs = collectChangedFilePathspecs(currentContext.changedFiles);
+  const changedPathspecs = collectChangedFilePathspecs(scopedFiles);
   if (changedPathspecs.add.length === 0 && changedPathspecs.remove.length === 0) {
     throw new CommitMeCommitError("No git changes to commit after gathering context.", { code: "no-changes" });
   }
