@@ -1,4 +1,4 @@
-import { complete, type AssistantMessage } from "@earendil-works/pi-ai/compat";
+import { complete, type AssistantMessage, type ProviderHeaders } from "@earendil-works/pi-ai/compat";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import {
@@ -187,7 +187,7 @@ function fallbackPromptPayload(prompt: string): CommitPromptPayload {
 
 async function completePrompt(
   ctx: DraftCommitMessageContext,
-  auth: { apiKey: string; headers?: Record<string, string> },
+  auth: { apiKey: string; headers?: ProviderHeaders },
   payload: CommitPromptPayload,
   userPrompt: string,
   maxTokens: number,
@@ -284,7 +284,7 @@ function createInvalidDraftError(attempts: DraftAttemptDiagnostics[]): CommitMeD
   );
 }
 
-type DraftAuth = { apiKey: string; headers?: Record<string, string> };
+type DraftAuth = { apiKey: string; headers?: ProviderHeaders };
 
 type DraftValidationSuccess = { ok: true; message: string; responseText: string };
 
