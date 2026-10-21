@@ -271,6 +271,25 @@ Use isolated loading so other configured extensions do not interfere.
 - `pi --no-extensions -e .` loads the extension.
 - The smoke test confirms `/commitme` and the `commitme` tool are available after implementation.
 
+### 18. Validate and prepare release 0.3.1
+
+- [x] Prepare a patch release with passing tests and fresh Sonar analysis.
+
+#### Why
+Keep the release validated and resolve actionable quality and dependency findings.
+
+#### How
+Refresh dependencies, fix findings without weakening safety checks, bump package metadata, and run validation with coverage and Sonar.
+
+#### Where
+`src/git/context.ts`, `test/context.test.mjs`, package manifests, and `CHANGELOG.md`.
+
+#### Acceptance criteria
+- Version is consistently `0.3.1` in both package manifests.
+- Full validation and coverage tests pass.
+- npm audit reports no known vulnerabilities.
+- Fresh Sonar analysis passes the quality gate with no active issues.
+
 ## Testing Strategy
 
 - Use pure unit tests for parser, prompt, truncation, and filtering.

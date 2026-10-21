@@ -33,6 +33,7 @@ import { appendTruncationNotice, truncateText } from "../utils/truncation.ts";
 const CONTENT_SENSITIVITY_SCAN_MAX_BYTES = 128_000;
 const SECRET_SCAN_CHUNK_BYTES = 64_000;
 const SECRET_SCAN_OVERLAP_CHARS = 4_096;
+const CONTENT_SAFETY_SCAN_CONCURRENCY = 8;
 const SECRET_KEY_SUFFIXES = [
   "api_key",
   "access_key",
@@ -142,25 +143,33 @@ export const STATUS_PORCELAIN_Z_ARGS = ["status", "--porcelain=v1", "-z", "-uall
 // and ref locks: another git process holds the lock.
 const GIT_LOCK_HELD_PATTERN = /Unable to create '[^'\n]*\.lock': File exists/u;
 
+async function executeGitWithLockRetry(
+  executor: CommitMeExecutor,
+  args: string[],
+  options: CommitMeExecOptions,
+  deadline: number,
+): Promise<CommitMeExecResult> {
+  const result = await executor.exec("git", args, options);
+  if (result.killed || result.code === 0 || !GIT_LOCK_HELD_PATTERN.test(result.stderr) || options.signal?.aborted) {
+    return result;
+  }
+  if (Date.now() >= deadline) {
+    return { ...result, stderr: `${result.stderr.trimEnd()}\nThe lock was still held after waiting ${GIT_LOCK_WAIT_MS / 1000} s.` };
+  }
+
+  // Retries depend on the preceding lock failure and must remain sequential.
+  // The lock belongs to another git process and is never touched here.
+  await sleep(GIT_LOCK_RETRY_INTERVAL_MS, undefined, { signal: options.signal });
+  return executeGitWithLockRetry(executor, args, options, deadline);
+}
+
 export async function runGit(
   executor: CommitMeExecutor,
   args: string[],
   options: GitRunOptions = {},
 ): Promise<CommitMeExecResult> {
   const { allowFailure = false, timeout = DEFAULT_GIT_TIMEOUT_MS, ...execOptions } = options;
-  const deadline = Date.now() + GIT_LOCK_WAIT_MS;
-  let result = await executor.exec("git", args, { ...execOptions, timeout });
-  // Only a command that takes a lock fails this way. The lock belongs to
-  // another git process and is never touched here.
-  while (!result.killed && result.code !== 0 && GIT_LOCK_HELD_PATTERN.test(result.stderr)) {
-    if (execOptions.signal?.aborted) break;
-    if (Date.now() >= deadline) {
-      result = { ...result, stderr: `${result.stderr.trimEnd()}\nThe lock was still held after waiting ${GIT_LOCK_WAIT_MS / 1000} s.` };
-      break;
-    }
-    await sleep(GIT_LOCK_RETRY_INTERVAL_MS);
-    result = await executor.exec("git", args, { ...execOptions, timeout });
-  }
+  const result = await executeGitWithLockRetry(executor, args, { ...execOptions, timeout }, Date.now() + GIT_LOCK_WAIT_MS);
 
   if (!allowFailure && result.code !== 0) {
     throw new GitCommandError(`git ${args.join(" ")} failed: ${result.stderr.trim() || result.stdout.trim()}`.trim(), {
@@ -585,34 +594,45 @@ async function inspectChangedFileContentSafety(root: string, path: string, signa
   }
 }
 
-async function applyContentSensitivity(root: string, changedFiles: ChangedFile[], signal?: AbortSignal): Promise<ChangedFile[]> {
-  const scannedPaths = new Map<string, ChangedFileContentSafety>();
-  const output: ChangedFile[] = [];
+async function inspectContentSafetyEntry(root: string, path: string, signal?: AbortSignal): Promise<[string, ChangedFileContentSafety]> {
+  return [path, await inspectChangedFileContentSafety(root, path, signal)];
+}
 
-  for (const file of changedFiles) {
+async function* inspectContentSafetyBatches(root: string, paths: string[], signal?: AbortSignal) {
+  for (let start = 0; start < paths.length; start += CONTENT_SAFETY_SCAN_CONCURRENCY) {
     if (signal?.aborted) throw createAbortError(signal);
-
-    if (isKnownSecretPath(file.path) || file.status.startsWith("D")) {
-      output.push(file);
-      continue;
-    }
-
-    let contentSafety = scannedPaths.get(file.path);
-    if (contentSafety === undefined) {
-      contentSafety = await inspectChangedFileContentSafety(root, file.path, signal);
-      scannedPaths.set(file.path, contentSafety);
-    }
-
-    if (contentSafety === "secret") {
-      output.push({ ...file, sensitive: true, secretContent: true });
-    } else if (contentSafety === "unreadable") {
-      output.push({ ...file, unreadable: true });
-    } else {
-      output.push(file);
-    }
+    const batch = paths.slice(start, start + CONTENT_SAFETY_SCAN_CONCURRENCY);
+    // Yield one batch at a time so concurrent secret scans cannot exhaust file descriptors.
+    yield Promise.all(batch.map((path) => inspectContentSafetyEntry(root, path, signal)));
   }
+}
 
-  return output;
+function withContentSafety(file: ChangedFile, contentSafety?: ChangedFileContentSafety): ChangedFile {
+  if (isKnownSecretPath(file.path) || file.status.startsWith("D")) return file;
+  if (contentSafety === "secret") return { ...file, sensitive: true, secretContent: true };
+  if (contentSafety === "unreadable") return { ...file, unreadable: true };
+  return file;
+}
+
+async function applyContentSensitivity(root: string, changedFiles: ChangedFile[], signal?: AbortSignal): Promise<ChangedFile[]> {
+  if (signal?.aborted) throw createAbortError(signal);
+  const paths = [...new Set(changedFiles
+    .filter((file) => !isKnownSecretPath(file.path) && !file.status.startsWith("D"))
+    .map((file) => file.path))];
+  const scannedPaths = new Map<string, ChangedFileContentSafety>();
+  for await (const batch of inspectContentSafetyBatches(root, paths, signal)) {
+    for (const [path, safety] of batch) scannedPaths.set(path, safety);
+  }
+  return changedFiles.map((file) => withContentSafety(file, scannedPaths.get(file.path)));
+}
+
+function readChangedFileContext(
+  root: string,
+  file: ChangedFile,
+  options: Required<Pick<GatherGitContextOptions, "projectFileMaxBytes" | "projectFileMaxLines">>,
+): Promise<ProjectContextEntry | SkippedProjectContextEntry> {
+  const reason = skippedReasonForChangedFile(file);
+  return reason ? Promise.resolve({ path: file.path, reason }) : readContextEntry(root, file.path, "changed-file-snippet", options);
 }
 
 export async function gatherProjectContext(
@@ -625,15 +645,12 @@ export async function gatherProjectContext(
     projectFileMaxBytes: options.projectFileMaxBytes ?? DEFAULT_PROJECT_FILE_MAX_BYTES,
     projectFileMaxLines: options.projectFileMaxLines ?? DEFAULT_PROJECT_FILE_MAX_LINES,
   };
-  const metadata: ProjectContextEntry[] = [];
   const changedFileSnippets: ProjectContextEntry[] = [];
   const skipped: SkippedProjectContextEntry[] = [];
 
   const metadataPaths = PROJECT_METADATA_CANDIDATES.slice(0, resolvedOptions.projectContextFileLimit);
-  for (const path of metadataPaths) {
-    const entry = await readContextEntry(root, path, "metadata", resolvedOptions);
-    if (isProjectContextEntry(entry)) metadata.push(entry);
-  }
+  const metadataEntries = await Promise.all(metadataPaths.map((path) => readContextEntry(root, path, "metadata", resolvedOptions)));
+  const metadata = metadataEntries.filter(isProjectContextEntry);
 
   const metadataSet = new Set(metadata.map((entry) => entry.path));
   const snippetCandidates = dedupeChangedFileCandidates(
@@ -643,14 +660,8 @@ export async function gatherProjectContext(
       .sort((a, b) => a.path.localeCompare(b.path)),
   ).slice(0, resolvedOptions.projectContextFileLimit);
 
-  for (const file of snippetCandidates) {
-    const skippedReason = skippedReasonForChangedFile(file);
-    if (skippedReason) {
-      skipped.push({ path: file.path, reason: skippedReason });
-      continue;
-    }
-
-    const entry = await readContextEntry(root, file.path, "changed-file-snippet", resolvedOptions);
+  const snippetEntries = await Promise.all(snippetCandidates.map((file) => readChangedFileContext(root, file, resolvedOptions)));
+  for (const entry of snippetEntries) {
     if (isProjectContextEntry(entry)) {
       changedFileSnippets.push(entry);
     } else if (entry.reason !== "missing") {
@@ -789,14 +800,11 @@ async function collectDiffSummary(
     .filter((file) => file.scope === scope && !file.sensitive && !file.generated && !file.binary && !file.status.startsWith("D"))
     .slice(0, options.diffFileLimit);
 
-  if (options.cwd) {
-    for (const file of candidates) {
-      const entry = await readContextEntry(options.cwd, file.path, "changed-file-snippet", {
-        projectFileMaxBytes: CONTENT_SENSITIVITY_SCAN_MAX_BYTES,
-        projectFileMaxLines: Number.MAX_SAFE_INTEGER,
-      });
-      if (isProjectContextEntry(entry)) safePaths.push(file.path);
-    }
+  const cwd = options.cwd;
+  if (cwd) {
+    const entryOptions = { projectFileMaxBytes: CONTENT_SENSITIVITY_SCAN_MAX_BYTES, projectFileMaxLines: Number.MAX_SAFE_INTEGER };
+    const entries = await Promise.all(candidates.map((file) => readChangedFileContext(cwd, file, entryOptions)));
+    safePaths.push(...entries.filter(isProjectContextEntry).map((entry) => entry.path));
   }
 
   let rawExcerpt = "";

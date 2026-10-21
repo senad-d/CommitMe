@@ -8,6 +8,7 @@ import test from "node:test";
 
 import {
   gatherGitContext,
+  gatherProjectContext,
   getRepositoryRoot,
   GitCommandError,
   isKnownSecretPath,
@@ -50,6 +51,20 @@ function createExecutor(calls = []) {
       }
     },
   };
+}
+
+function createScriptedExecutor(results, calls = []) {
+  return {
+    async exec(command, args, options) {
+      calls.push({ command, args, options });
+      assert.ok(results.length > 0, "unexpected git retry");
+      return results.shift();
+    },
+  };
+}
+
+function lockFailure(path = "index.lock") {
+  return { stdout: "", stderr: `fatal: Unable to create '.git/${path}': File exists\n`, code: 128, killed: false };
 }
 
 async function git(cwd, args) {
@@ -95,6 +110,42 @@ test("runGit throws structured errors for failed git commands", async () => {
       (error) => error instanceof GitCommandError && error.code === "git-command-failed",
     );
   });
+});
+
+test("runGit retries a ref lock sequentially and preserves execution options", async () => {
+  const calls = [];
+  const success = { stdout: "done", stderr: "", code: 0, killed: false };
+  const controller = new AbortController();
+  const executor = createScriptedExecutor([lockFailure("refs/heads/main.lock"), success], calls);
+  const options = { cwd: "/fixture", timeout: 42_000, signal: controller.signal };
+
+  assert.deepEqual(await runGit(executor, ["add", "file.ts"], options), success);
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every((call) => call.command === "git"));
+  assert.ok(calls.every((call) => JSON.stringify(call.args) === JSON.stringify(["add", "file.ts"])));
+  assert.ok(calls.every((call) => call.options.cwd === options.cwd && call.options.timeout === options.timeout));
+  assert.ok(calls.every((call) => call.options.signal === controller.signal));
+});
+
+test("runGit does not retry killed commands or ordinary failures", async () => {
+  const ordinaryFailure = { stdout: "", stderr: "permission denied", code: 1, killed: false };
+  const killed = { ...lockFailure("HEAD.lock"), killed: true };
+  const calls = [];
+
+  assert.deepEqual(await runGit(createScriptedExecutor([ordinaryFailure], calls), ["status"], { allowFailure: true }), ordinaryFailure);
+  await assert.rejects(() => runGit(createScriptedExecutor([killed], calls), ["commit"]), GitCommandError);
+  assert.equal(calls.length, 2);
+});
+
+test("runGit cancels a pending lock retry without executing git again", async () => {
+  const controller = new AbortController();
+  const calls = [];
+  const pending = runGit(createScriptedExecutor([lockFailure()], calls), ["add", "file.ts"], { signal: controller.signal });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort(new Error("cancel retry"));
+
+  await assert.rejects(pending, { name: "AbortError" });
+  assert.equal(calls.length, 1);
 });
 
 test("isKnownSecretPath allows dotenv variant files by path", () => {
@@ -302,6 +353,54 @@ test("gatherGitContext includes project metadata deterministically", async () =>
 
     assert.deepEqual(metadataPaths.slice(0, 2), ["package.json", "README.md"]);
     assert.match(context.project.metadata[0].content, /"name": "fixture"/);
+  });
+});
+
+test("gatherProjectContext preserves candidate order, limits, skips, and duplicate safety flags", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "package.json"), '{"name":"fixture"}\n');
+    await writeFile(join(dir, "README.md"), "# Fixture\n");
+    await writeFile(join(dir, "a.ts"), "export const a = true;\n");
+    await writeFile(join(dir, "b.ts"), "export const b = true;\n");
+    const files = parseStatusPorcelainZ("?? b.ts\0?? a.ts\0?? a.ts\0?? c.ts\0?? d.ts\0?? e.ts\0");
+    files[2].unreadable = true;
+    files[3].generated = true;
+    files[4].sensitive = true;
+    const options = { projectContextFileLimit: 4 };
+
+    const project = await gatherProjectContext(dir, files, options);
+    assert.deepEqual(project.metadata.map((entry) => entry.path), ["package.json", "README.md"]);
+    assert.deepEqual(project.changedFileSnippets.map((entry) => entry.path), ["b.ts"]);
+    assert.deepEqual(project.skipped, [
+      { path: "a.ts", reason: "unreadable" },
+      { path: "c.ts", reason: "generated" },
+      { path: "d.ts", reason: "sensitive" },
+    ]);
+    assert.deepEqual(await gatherProjectContext(dir, files, options), project);
+    const empty = await gatherProjectContext(dir, files, { projectContextFileLimit: 0 });
+    assert.deepEqual(empty, { root: dir, metadata: [], changedFileSnippets: [], skipped: [] });
+  });
+});
+
+test("gatherGitContext scans multiple batches and flags every scope without exposing secrets", async () => {
+  await withTempDir(async (dir) => {
+    await initRepo(dir);
+    const syntheticKey = `sk-${"AbCdEfGhIjKlMnOpQrStUvWxYz012345"}`;
+    const paths = Array.from({ length: 18 }, (_, index) => `file-${String(index).padStart(2, "0")}.ts`);
+    await Promise.all(paths.map((path, index) => writeFile(join(dir, path), [7, 8, 17].includes(index)
+      ? `export const key = "${syntheticKey}";\n`
+      : "export const safe = true;\n")));
+    await git(dir, ["add", "--", ...paths]);
+    await appendFile(join(dir, paths[8]), "export const extra = true;\n");
+
+    const context = await gatherGitContext(createExecutor(), { cwd: dir });
+    const flagged = context.changedFiles.filter((file) => file.secretContent);
+    assert.deepEqual(flagged.map((file) => `${file.scope}:${file.path}`).sort(), [
+      "staged:file-07.ts", "staged:file-08.ts", "staged:file-17.ts", "unstaged:file-08.ts",
+    ]);
+    assert.ok(flagged.every((file) => file.sensitive));
+    assert.doesNotMatch(JSON.stringify(context), new RegExp(syntheticKey));
+    assert.deepEqual(context, await gatherGitContext(createExecutor(), { cwd: dir }));
   });
 });
 

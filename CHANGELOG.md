@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.1 - 2026-10-22
+
+- Parallelized independent metadata, snippet, and diff-safety reads while preserving deterministic ordering and filtering; high-confidence secret scans run in deduplicated batches of at most eight files.
+- Made git lock retry waits abortable while keeping retries sequential and retaining the lock deadline and failure diagnostics.
+- Updated development-only Pi packages to 1.3.0 and refreshed the lockfile to remove known dependency vulnerabilities; host-provided peer dependency ranges remain unchanged.
 - A git command that fails because another git process holds `index.lock`, `HEAD.lock` or a ref lock is retried every 250 ms for up to 10 seconds, then fails with git's error plus "The lock was still held after waiting 10 s."; lock files are never removed. Local git reads time out after 30 seconds instead of 5, for slow or emulated git under parallel agents.
 - Added an optional `paths` allowlist to `commitme action="commit"` so agents can stage and commit only approved repo-relative paths, refusing listed paths without changes and staged changes outside the list; `steeringPrompt` guides message wording only and never scopes paths.
 - Fixed `commitme action="commit"` results to return control to the agent so requested follow-up tools can run after a local commit.

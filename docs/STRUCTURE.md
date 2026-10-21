@@ -34,7 +34,7 @@ src/
 3. `src/tools/commitme-tool.ts` exposes gather behavior, explicit-message commit behavior, and message-less `/commitme` parity commit behavior to the agent with structured `details`.
 4. `src/workflows/commitme-commit-flow.ts` gathers context, refuses unsafe files, builds bounded prompts, drafts and validates subjects, optionally confirms, and creates local commits without UI-specific side effects.
 5. `src/model/draft-commit-message.ts` calls the active Pi model with system/user prompt parts, inspects response shape, retries empty/thinking-only/length-stopped drafts, repairs invalid drafts when safe, and returns only validated one-line subjects plus safe diagnostics where requested.
-6. `src/git/context.ts` reads git status/diff data, project metadata, safe file snippets, symlink-safe omission reasons, and abort-aware local secret scans for changed files.
+6. `src/git/context.ts` reads git status/diff data, project metadata, safe file snippets, symlink-safe omission reasons, and abort-aware local secret scans for changed files. Independent context reads run concurrently with stable output ordering; secret scans deduplicate paths and process at most eight files at once.
 7. `src/git/commit.ts` validates and normalizes Lightweight Conventional Commit subjects, stages the gathered changed paths, and commits with `git commit`.
 8. `src/prompt/build-commit-prompt.ts` formats weak-model-friendly prompt sections, includes bounded user steering guidance, independently budgets sections by priority, bounds final prompt size, and preserves the final output reminder when truncation is needed.
 9. `src/commitme-details.ts` keeps command and tool result metadata consistent.
@@ -52,7 +52,7 @@ src/
 
 ## Security-sensitive areas
 
-- Local git shell execution uses `pi.exec("git", args)` with argument arrays. Reads time out after 30 s. `runGit` retries a command that failed on another git process's `*.lock` (`index.lock`, `HEAD.lock`, a ref lock) every 250 ms for up to 10 s, then fails with git's error plus a note that the lock was still held; CommitMe never removes a lock file.
+- Local git shell execution uses `pi.exec("git", args)` with argument arrays. Reads time out after 30 s. `runGit` retries a command that failed on another git process's `*.lock` (`index.lock`, `HEAD.lock`, a ref lock) every 250 ms for up to 10 s, then fails with git's error plus a note that the lock was still held; retry waits honor abort signals and CommitMe never removes a lock file.
 - Tool gather mode is read-only; `/commitme` and message-less `commitme action="commit"` are explicit draft-and-commit paths; explicit-message `commitme action="commit"` uses a provided final subject.
 - Model drafting retries and repairs happen before confirmation, staging, or committing, and diagnostics avoid raw prompt/diff/model-output content.
 - Commit mode is explicit and stages only gathered changed paths before `git commit`.
