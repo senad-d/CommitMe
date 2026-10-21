@@ -2,7 +2,11 @@ export const EXTENSION_DISPLAY_NAME = "CommitMe";
 export const COMMITME_COMMAND_NAME = "commitme";
 export const COMMITME_TOOL_NAME = "commitme";
 
-export const DEFAULT_GIT_TIMEOUT_MS = 5_000;
+// Emulated git (e.g. Rosetta in a container) under parallel agents needs far more than 5 s for a read.
+export const DEFAULT_GIT_TIMEOUT_MS = 30_000;
+// A command that finds another git process's *.lock retries every interval until the wait ends.
+export const GIT_LOCK_RETRY_INTERVAL_MS = 250;
+export const GIT_LOCK_WAIT_MS = 10_000;
 export const DEFAULT_COMMIT_TIMEOUT_MS = 15_000;
 export const DEFAULT_DIFF_FILE_LIMIT = 24;
 export const DEFAULT_DIFF_MAX_LINES = 360;

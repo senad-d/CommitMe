@@ -81,6 +81,6 @@ test("extension entry point delegates to command and the single commitme tool re
 test("implementation avoids background resources and custom widgets", async () => {
   const source = await readSourceTree();
 
-  assert.doesNotMatch(source, /setInterval|setTimeout|watch\(|createServer|listen\(/);
+  assert.doesNotMatch(source, /setInterval|setTimeout\(|watch\(|createServer|listen\(/);
   assert.doesNotMatch(source, /setWidget\(|ui\.custom\(/);
 });

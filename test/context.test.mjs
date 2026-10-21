@@ -74,7 +74,7 @@ test("getRepositoryRoot detects the git repository root", async () => {
     assert.equal(root, await realpath(dir));
     assert.equal(calls[0].command, "git");
     assert.deepEqual(calls[0].args, ["rev-parse", "--show-toplevel"]);
-    assert.equal(calls[0].options.timeout, 5000);
+    assert.equal(calls[0].options.timeout, 30_000);
   });
 });
 

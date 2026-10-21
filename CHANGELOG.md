@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A git command that fails because another git process holds `index.lock`, `HEAD.lock` or a ref lock is retried every 250 ms for up to 10 seconds, then fails with git's error plus "The lock was still held after waiting 10 s."; lock files are never removed. Local git reads time out after 30 seconds instead of 5, for slow or emulated git under parallel agents.
 - Added an optional `paths` allowlist to `commitme action="commit"` so agents can stage and commit only approved repo-relative paths, refusing listed paths without changes and staged changes outside the list; `steeringPrompt` guides message wording only and never scopes paths.
 - Fixed `commitme action="commit"` results to return control to the agent so requested follow-up tools can run after a local commit.
 - Added UI approval prompts for flagged unsafe changed files so users can commit reviewed safe fixtures/placeholders or block the commit before staging.

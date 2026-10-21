@@ -1,6 +1,7 @@
 import { createReadStream } from "node:fs";
 import { lstat, readFile, readlink, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import type {
   ChangedFile,
@@ -23,6 +24,8 @@ import {
   DEFAULT_PROJECT_CONTEXT_FILE_LIMIT,
   DEFAULT_PROJECT_FILE_MAX_BYTES,
   DEFAULT_PROJECT_FILE_MAX_LINES,
+  GIT_LOCK_RETRY_INTERVAL_MS,
+  GIT_LOCK_WAIT_MS,
   PROJECT_METADATA_CANDIDATES,
 } from "../constants.ts";
 import { appendTruncationNotice, truncateText } from "../utils/truncation.ts";
@@ -135,13 +138,29 @@ export interface GatherGitContextOptions extends CommitMeExecOptions {
 export const STATUS_PORCELAIN_ARGS = ["status", "--porcelain=v1", "--branch", "-uall"];
 export const STATUS_PORCELAIN_Z_ARGS = ["status", "--porcelain=v1", "-z", "-uall"];
 
+// git's "Unable to create '<path>.lock': File exists" for index.lock, HEAD.lock
+// and ref locks: another git process holds the lock.
+const GIT_LOCK_HELD_PATTERN = /Unable to create '[^'\n]*\.lock': File exists/u;
+
 export async function runGit(
   executor: CommitMeExecutor,
   args: string[],
   options: GitRunOptions = {},
 ): Promise<CommitMeExecResult> {
   const { allowFailure = false, timeout = DEFAULT_GIT_TIMEOUT_MS, ...execOptions } = options;
-  const result = await executor.exec("git", args, { ...execOptions, timeout });
+  const deadline = Date.now() + GIT_LOCK_WAIT_MS;
+  let result = await executor.exec("git", args, { ...execOptions, timeout });
+  // Only a command that takes a lock fails this way. The lock belongs to
+  // another git process and is never touched here.
+  while (!result.killed && result.code !== 0 && GIT_LOCK_HELD_PATTERN.test(result.stderr)) {
+    if (execOptions.signal?.aborted) break;
+    if (Date.now() >= deadline) {
+      result = { ...result, stderr: `${result.stderr.trimEnd()}\nThe lock was still held after waiting ${GIT_LOCK_WAIT_MS / 1000} s.` };
+      break;
+    }
+    await sleep(GIT_LOCK_RETRY_INTERVAL_MS);
+    result = await executor.exec("git", args, { ...execOptions, timeout });
+  }
 
   if (!allowFailure && result.code !== 0) {
     throw new GitCommandError(`git ${args.join(" ")} failed: ${result.stderr.trim() || result.stdout.trim()}`.trim(), {

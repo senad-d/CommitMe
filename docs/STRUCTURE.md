@@ -52,7 +52,7 @@ src/
 
 ## Security-sensitive areas
 
-- Local git shell execution uses `pi.exec("git", args)` with argument arrays.
+- Local git shell execution uses `pi.exec("git", args)` with argument arrays. Reads time out after 30 s. `runGit` retries a command that failed on another git process's `*.lock` (`index.lock`, `HEAD.lock`, a ref lock) every 250 ms for up to 10 s, then fails with git's error plus a note that the lock was still held; CommitMe never removes a lock file.
 - Tool gather mode is read-only; `/commitme` and message-less `commitme action="commit"` are explicit draft-and-commit paths; explicit-message `commitme action="commit"` uses a provided final subject.
 - Model drafting retries and repairs happen before confirmation, staging, or committing, and diagnostics avoid raw prompt/diff/model-output content.
 - Commit mode is explicit and stages only gathered changed paths before `git commit`.

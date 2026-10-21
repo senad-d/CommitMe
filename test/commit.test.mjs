@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -537,4 +537,29 @@ test("source does not contain git push", async () => {
   const { readFile } = await import("node:fs/promises");
   const source = await readFile(new URL("../src/git/commit.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /git push|\["push"\]/);
+});
+
+test("createCommit waits for another process's index.lock and fails with the lock named once the wait ends", { timeout: 30_000 }, async () => {
+  await withTempRepo(async (dir) => {
+    const calls = [];
+    const lockPath = join(dir, ".git", "index.lock");
+    await writeFile(join(dir, "feature.ts"), "export const feature = true;\n", "utf8");
+    await writeFile(lockPath, "", "utf8");
+    const released = new Promise((resolve) => setTimeout(resolve, 700)).then(() => rm(lockPath));
+
+    await createCommit(createExecutor(calls), { cwd: dir, message: "feat: add feature module" });
+    await released;
+
+    const { stdout } = await execFileAsync("git", ["log", "-1", "--pretty=%s"], { cwd: dir });
+    assert.equal(stdout.trim(), "feat: add feature module");
+    assert.ok(calls.filter((call) => call.args[0] === "add").length > 1, "the stage must have retried");
+
+    await writeFile(join(dir, "other.ts"), "export const other = true;\n", "utf8");
+    await writeFile(lockPath, "", "utf8");
+    await assert.rejects(
+      () => createCommit(createExecutor(), { cwd: dir, message: "feat: add other module" }),
+      /index\.lock': File exists[\s\S]*The lock was still held after waiting 10 s\./u,
+    );
+    await access(lockPath);
+  });
 });
