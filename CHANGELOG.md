@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.2 - 2026-10-22
+
 - Added an optional `worktreePath` to the `commitme` tool so one agent session can gather and commit in another worktree of the same repository; it must be the absolute root of a worktree sharing the current repository's git common dir, and anything else is refused before staging.
 
 ## 0.3.1 - 2026-10-22
