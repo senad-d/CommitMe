@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -605,4 +605,61 @@ test("commitme tool commit action fails fast when confirmation is unavailable", 
     /confirm=true requires a UI-capable Pi mode/,
   );
   assert.equal(calls.length, 0);
+});
+
+test("commitme tool gathers and commits in a linked worktree named by worktreePath", async () => {
+  await withTempRepo(async (dir) => {
+    const worktree = `${dir}-linked`;
+    try {
+      await execFileAsync("git", ["worktree", "add", "-b", "linked-branch", worktree], { cwd: dir });
+      await writeFile(join(worktree, "feature.ts"), "export const feature = true;\n", "utf8");
+      const { stdout: primaryHeadBefore } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: dir });
+
+      const tool = createCommitMeTool(createExecutor());
+      const gathered = await tool.execute("tool-call", { action: "gather", worktreePath: worktree }, undefined, undefined, { cwd: dir });
+      const committed = await tool.execute(
+        "tool-call",
+        { action: "commit", message: "feat: add feature module", paths: ["feature.ts"], worktreePath: worktree },
+        undefined,
+        undefined,
+        { cwd: dir, hasUI: false },
+      );
+      const { stdout: linkedSubject } = await execFileAsync("git", ["log", "-1", "--pretty=%s", "linked-branch"], { cwd: dir });
+      const { stdout: primaryHeadAfter } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: dir });
+      const { stdout: primaryStatus } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: dir });
+
+      assert.match(gathered.content[0].text, /feature\.ts/);
+      assert.equal(gathered.details.branch, "linked-branch");
+      assert.match(committed.content[0].text, /Committed/);
+      assert.equal(committed.details.branch, "linked-branch");
+      assert.match(committed.details.repositoryRoot, /-linked$/);
+      assert.equal(linkedSubject.trim(), "feat: add feature module");
+      assert.equal(primaryHeadAfter, primaryHeadBefore);
+      assert.equal(primaryStatus, "");
+    } finally {
+      await rm(worktree, { recursive: true, force: true });
+    }
+  });
+});
+
+test("commitme tool refuses a relative, missing, subdirectory or other-repository worktreePath before staging", async () => {
+  await withTempRepo(async (dir) => {
+    await withTempRepo(async (otherDir) => {
+      await writeFile(join(otherDir, "feature.ts"), "export const feature = true;\n", "utf8");
+      const calls = [];
+      const tool = createCommitMeTool(createExecutor(calls));
+      const commit = (worktreePath) =>
+        tool.execute("tool-call", { action: "commit", message: "feat: add feature module", worktreePath }, undefined, undefined, { cwd: dir, hasUI: false });
+
+      await assert.rejects(() => commit("relative/worktree"), /must be an absolute path/);
+      await assert.rejects(() => commit(otherDir), /different repository/);
+      await assert.rejects(() => commit(join(dir, "missing")), /not an existing directory/);
+      await mkdir(join(dir, "sub"));
+      await assert.rejects(() => commit(join(dir, "sub")), /not a subdirectory/);
+      const { stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: otherDir });
+
+      assert.match(status, /\?\? feature\.ts/);
+      assert.equal(calls.some((call) => call.args[0] === "add" || call.args[0] === "commit"), false);
+    });
+  });
 });

@@ -1,3 +1,6 @@
+import { realpath, stat } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
+
 import { StringEnum } from "@earendil-works/pi-ai";
 import { defineTool, type AgentToolResult, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
@@ -5,7 +8,7 @@ import { Type, type Static } from "typebox";
 import { collectGitContextTruncation, createCommitMeDetails } from "../commitme-details.ts";
 import { COMMITME_TOOL_NAME, EXTENSION_DISPLAY_NAME } from "../constants.ts";
 import { CommitMeCommitError, assertNoUnsafeCommitFiles, createCommit, scopeChangedFilesToPaths, validateCommitMessage } from "../git/commit.ts";
-import { gatherGitContext } from "../git/context.ts";
+import { gatherGitContext, getRepositoryRoot, runGit } from "../git/context.ts";
 import type { DraftCommitMessageDependency } from "../model/draft-commit-message.ts";
 import { buildBoundedCommitPrompt } from "../prompt/build-commit-prompt.ts";
 import type { CommitMeToolDetails, CommitResult, GitContext } from "../types.ts";
@@ -40,6 +43,12 @@ export const CommitMeToolParameters = Type.Object({
     }),
   ),
   confirm: Type.Optional(Type.Boolean({ description: "Ask before creating the local commit when UI is available." })),
+  worktreePath: Type.Optional(
+    Type.String({
+      description:
+        "Absolute path to the root of another worktree (primary checkout or linked worktree) of the same repository. Gather and commit then run in that worktree, with paths relative to it. Omit for the current working directory.",
+    }),
+  ),
 });
 
 export type CommitMeToolInput = Static<typeof CommitMeToolParameters>;
@@ -58,6 +67,35 @@ interface CommitMeToolRuntime {
   params: CommitMeToolInput;
   signal: AbortSignal | undefined;
   ctx: ExtensionContext;
+  cwd: string;
+}
+
+async function gitCommonDir(pi: ExtensionAPI, cwd: string, signal: AbortSignal | undefined): Promise<string> {
+  const result = await runGit(pi, ["rev-parse", "--git-common-dir"], { cwd, signal });
+  return realpath(resolve(cwd, result.stdout.trim()));
+}
+
+// Refuses before any staging unless worktreePath is the root of a worktree of the same repository as ctx.cwd.
+async function resolveWorkingDirectory(
+  pi: ExtensionAPI,
+  worktreePath: string | undefined,
+  ctx: ExtensionContext,
+  signal: AbortSignal | undefined,
+): Promise<string> {
+  if (worktreePath === undefined) return ctx.cwd;
+  if (!isAbsolute(worktreePath)) throw new Error(`commitme worktreePath must be an absolute path: ${worktreePath}`);
+
+  const target = await realpath(worktreePath).catch(() => undefined);
+  if (!target || !(await stat(target)).isDirectory()) throw new Error(`commitme worktreePath is not an existing directory: ${worktreePath}`);
+
+  const root = await realpath(await getRepositoryRoot(pi, { cwd: target, signal }));
+  if (root !== target) throw new Error(`commitme worktreePath must be the root of a worktree, not a subdirectory: ${worktreePath}`);
+
+  const [targetCommonDir, currentCommonDir] = await Promise.all([gitCommonDir(pi, target, signal), gitCommonDir(pi, ctx.cwd, signal)]);
+  if (targetCommonDir !== currentCommonDir) {
+    throw new Error(`commitme worktreePath belongs to a different repository than the current working directory: ${worktreePath}`);
+  }
+  return target;
 }
 
 function requireValidCommitMessage(message: string | undefined): string {
@@ -137,7 +175,7 @@ async function executeExplicitCommit(runtime: CommitMeToolRuntime): Promise<Comm
   const message = requireValidCommitMessage(runtime.params.message);
   requireConfirmationUi(runtime.ctx, runtime.params.confirm);
 
-  const context = await gatherGitContext(runtime.pi, { cwd: runtime.ctx.cwd, signal: runtime.signal });
+  const context = await gatherGitContext(runtime.pi, { cwd: runtime.cwd, signal: runtime.signal });
   const scopedFiles = runtime.params.paths ? scopeChangedFilesToPaths(context.changedFiles, runtime.params.paths) : context.changedFiles;
   const approveUnsafeCommitFiles = createUnsafeCommitFileApproval(runtime.ctx);
   if (!approveUnsafeCommitFiles) assertNoUnsafeCommitFiles(scopedFiles);
@@ -148,7 +186,7 @@ async function executeExplicitCommit(runtime: CommitMeToolRuntime): Promise<Comm
 
   try {
     const committed = await createCommit(runtime.pi, {
-      cwd: runtime.ctx.cwd,
+      cwd: runtime.cwd,
       signal: runtime.signal,
       message,
       paths: runtime.params.paths,
@@ -169,7 +207,7 @@ async function executeDraftedCommit(runtime: CommitMeToolRuntime): Promise<Commi
 
   const approveUnsafeCommitFiles = createUnsafeCommitFileApproval(runtime.ctx);
   const result = await draftAndCreateCommit(runtime.pi, {
-    cwd: runtime.ctx.cwd,
+    cwd: runtime.cwd,
     signal: runtime.signal,
     steeringPrompt: runtime.params.steeringPrompt,
     paths: runtime.params.paths,
@@ -190,7 +228,7 @@ async function executeCommit(runtime: CommitMeToolRuntime): Promise<CommitMeTool
 }
 
 async function executeGather(runtime: CommitMeToolRuntime): Promise<CommitMeToolResult> {
-  const context = await gatherGitContext(runtime.pi, { cwd: runtime.ctx.cwd, signal: runtime.signal });
+  const context = await gatherGitContext(runtime.pi, { cwd: runtime.cwd, signal: runtime.signal });
   const prompt = buildBoundedCommitPrompt(context, {
     steeringPrompt: runtime.params.steeringPrompt,
     modelContextWindow: runtime.ctx.model?.contextWindow,
@@ -218,7 +256,7 @@ export function createCommitMeTool(pi: ExtensionAPI, options: CreateCommitMeTool
     name: COMMITME_TOOL_NAME,
     label: EXTENSION_DISPLAY_NAME,
     description:
-      "CommitMe gathers local git diff and project context or creates local commits. Slash usage: /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] or /commitme --steering guides drafting, and /commitme help shows help. Tool usage: action=gather is read-only; action=commit with message uses an explicit final subject; action=commit without message drafts and commits like /commitme; action=commit with paths stages and commits only the listed repo-relative paths.",
+      "CommitMe gathers local git diff and project context or creates local commits. Slash usage: /commitme commits, /commitme --confirm asks first, /commitme [steering prompt] or /commitme --steering guides drafting, and /commitme help shows help. Tool usage: action=gather is read-only; action=commit with message uses an explicit final subject; action=commit without message drafts and commits like /commitme; action=commit with paths stages and commits only the listed repo-relative paths. worktreePath lets one session commit in another worktree of the same repository; omit it for the current one.",
     promptSnippet: "Gather local git changes and project context for a one-line Lightweight Conventional Commit subject",
     promptGuidelines: [
       "Use commitme action=gather when the user asks for a commit message but not a commit.",
@@ -237,7 +275,8 @@ export function createCommitMeTool(pi: ExtensionAPI, options: CreateCommitMeTool
     executionMode: "sequential",
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const runtime = { pi, options, params, signal, ctx };
+      const cwd = await resolveWorkingDirectory(pi, params.worktreePath, ctx, signal);
+      const runtime = { pi, options, params, signal, ctx, cwd };
       const action = params.action ?? "gather";
       if (action === "commit") return executeCommit(runtime);
       return executeGather(runtime);

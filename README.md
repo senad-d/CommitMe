@@ -202,6 +202,8 @@ CommitMe also registers a `commitme` tool for agents.
 
 Both commit modes accept an optional `paths` allowlist of exact repo-relative paths. When present, CommitMe stages and commits only the listed paths, and refuses when a listed path has no changes or when staged changes outside the list would enter the commit. `steeringPrompt` guides message wording only; it never limits which paths are committed.
 
+Both actions accept an optional `worktreePath`: the absolute root of another worktree (the primary checkout or a linked worktree) of the same repository. CommitMe then gathers and commits in that worktree as if it were the working directory, `paths` stay relative to it, and all safety checks apply there; `details.repositoryRoot` and `details.branch` name that worktree. A relative path, a missing directory, a subdirectory of a worktree, or a different repository is refused before staging. Omit it for the current working directory.
+
 Use `action: "gather"` when you want pi to draft a message without immediately committing, or when another workflow needs bounded git context. Use `action: "commit"` only when you explicitly want a local git commit.
 
 The `commitme` tool returns control to the agent after every outcome instead of terminating the agent loop. Multi-step requests such as “commit and push” can therefore continue with a dedicated push tool after CommitMe creates the local commit. CommitMe itself never pushes.
